@@ -9,6 +9,7 @@ export default function Nav({ mode }: { mode: AuthMode }) {
   const links = [
     { href: "/products", label: "Productos" },
     { href: "/bulk", label: "Subida masiva" },
+    { href: "/shared", label: "Imagen a varios SKU" },
     ...(mode === "supabase" ? [{ href: "/history", label: "Historial" }] : []),
   ];
 

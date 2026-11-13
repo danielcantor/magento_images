@@ -1,5 +1,7 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { SHARED_SKUS_KEY } from "@/lib/skuList";
 import { api } from "@/lib/api";
 import { runBulkDelete } from "@/lib/bulk";
 import type { ProductRow } from "@/lib/types";
@@ -20,6 +22,16 @@ export default function ProductsView() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [editing, setEditing] = useState<ProductRow | null>(null);
   const job = useJob();
+  const router = useRouter();
+
+  function attachToSelected() {
+    try {
+      sessionStorage.setItem(SHARED_SKUS_KEY, JSON.stringify([...selected]));
+    } catch {
+      /* sessionStorage no disponible */
+    }
+    router.push("/shared");
+  }
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -189,6 +201,9 @@ export default function ProductsView() {
             Quitar selección
           </button>
           <span className="spacer" />
+          <button onClick={attachToSelected} disabled={job.running}>
+            Anexar imagen…
+          </button>
           <button onClick={() => bulkDelete(true)} disabled={job.running}>
             Borrar imágenes sin rol
           </button>

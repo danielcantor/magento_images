@@ -12,6 +12,11 @@ Web para **subir, ordenar, editar y borrar imágenes de productos de Magento 2 d
   - La imagen 1 puede quedar como base/small/thumbnail. En modo añadir, la base existente solo se cambia si subes la posición 1.
   - Redimensiona a 2500 px y comprime en el navegador; convierte WebP a JPG.
   - Progreso en vivo, botón de detener y CSV con el resultado.
+- **Imagen a varios SKU**: sube la misma imagen (o varias) a una lista de productos, cada una en la posición que elijas.
+  - Los SKU se pegan, se cargan desde un CSV (columna `sku` o la primera) o se mandan desde la tabla de Productos con **Anexar imagen…**.
+  - **Insertar y correr**: si eliges la posición 2, la nueva imagen queda segunda y las que estaban desde la 2 bajan un puesto. No se borra nada. Si el producto tiene menos imágenes, queda al final.
+  - Puedes darle roles (Base, Small, Thumbnail, Swatch); en cada producto se le quitan a la imagen que los tuviera.
+  - La imagen se comprime una sola vez y se reutiliza para todos los SKU.
 - **Borrado masivo**: selecciona productos y borra todas sus imágenes o solo las que no tienen rol.
 
 ## 1. Preparar Magento

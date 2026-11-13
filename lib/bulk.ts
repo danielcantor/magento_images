@@ -3,6 +3,7 @@
 // (para no pisar la galería del mismo producto) y varios SKU en paralelo.
 import { api, withRetry } from "./api";
 import { prepareImage } from "./imagePrep";
+import { planInsert } from "./positions";
 import { runPool } from "./pool";
 import type { SkuGroup } from "./skuMatcher";
 import type { MediaEntry } from "./types";
@@ -130,6 +131,68 @@ export async function runBulkDelete(
         step({ sku, action: "borrar", status: "ok", message: `${targets.length} imagen(es) borradas` });
       } catch (e) {
         step({ sku, action: "borrar", status: "error", message: msg(e) });
+      }
+    },
+    cb.signal,
+  );
+}
+
+export interface SharedImage {
+  file: File;
+  position: number;
+  types: string[];
+}
+
+/**
+ * Anexa las mismas imágenes a varios SKU, cada una en su posición.
+ * Las imágenes existentes desde esa posición bajan un puesto (no se borra nada).
+ */
+export async function runSharedUpload(skus: string[], images: SharedImage[], cb: JobCallbacks): Promise<void> {
+  const step = tracker(skus.length, cb);
+
+  // Se comprime una sola vez y se reutiliza en todos los SKU.
+  let prepared: File[];
+  try {
+    prepared = await Promise.all(images.map((i) => prepareImage(i.file)));
+  } catch (e) {
+    for (const sku of skus) step({ sku, action: "anexar", status: "error", message: `No se pudo preparar la imagen: ${msg(e)}` });
+    return;
+  }
+
+  await runPool(
+    skus,
+    cb.concurrency ?? 4,
+    async (sku) => {
+      let uploaded = 0;
+      let moved = 0;
+      try {
+        const existing = await withRetry(() => api.getMedia(sku));
+        const plan = planInsert(existing, images.map((i) => i.position));
+
+        for (let i = 0; i < images.length; i++) {
+          if (cb.signal?.aborted) return;
+          await withRetry(() =>
+            api.uploadMedia(sku, prepared[i], { position: plan.newPositions[i], types: images[i].types }),
+          );
+          uploaded++;
+        }
+
+        if (plan.moves.length) {
+          // Releer: al subir con roles, Magento se los quitó a otras imágenes.
+          const fresh = new Map((await withRetry(() => api.getMedia(sku))).map((e) => [e.id, e]));
+          for (const mv of plan.moves) {
+            const e = fresh.get(mv.id);
+            if (!e) continue;
+            await withRetry(() =>
+              api.updateMedia(sku, { id: e.id, label: e.label, disabled: e.disabled, types: e.types, position: mv.position }),
+            );
+            moved++;
+          }
+        }
+        step({ sku, action: "anexar", status: "ok", message: `${uploaded} imagen(es) anexadas, ${moved} movidas` });
+      } catch (e) {
+        const partial = uploaded || moved ? ` (hecho: ${uploaded} anexadas, ${moved} movidas)` : "";
+        step({ sku, action: "anexar", status: "error", message: msg(e) + partial });
       }
     },
     cb.signal,

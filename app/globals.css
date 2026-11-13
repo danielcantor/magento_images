@@ -151,3 +151,10 @@ tr:hover td { background: var(--surface-2); }
 .login .card { width: 100%; max-width: 360px; }
 .login form { display: flex; flex-direction: column; gap: 12px; }
 td code { white-space: nowrap; }
+textarea, input[type="number"] {
+  font: inherit; padding: 7px 10px; border-radius: 6px;
+  border: 1px solid var(--border); background: var(--surface); color: var(--text);
+}
+textarea { width: 100%; resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+textarea:focus, input[type="number"]:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.role.on:hover:not(:disabled) { background: var(--accent); filter: brightness(1.08); }

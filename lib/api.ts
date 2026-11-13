@@ -1,0 +1,72 @@
+// Llamadas desde el navegador a nuestra API (que a su vez habla con Magento).
+import type { MediaEntry, ProductSearchResult } from "./types";
+
+export class ApiError extends Error {
+  constructor(message: string, public status: number) {
+    super(message);
+  }
+}
+
+async function request<T>(url: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(url, init);
+  if (res.status === 401 && typeof window !== "undefined" && !url.startsWith("/api/auth")) {
+    window.location.href = "/login";
+  }
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new ApiError(body.error ?? `Error ${res.status}`, res.status);
+  return body as T;
+}
+
+const json = (method: string, data: unknown): RequestInit => ({
+  method,
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify(data),
+});
+
+const enc = encodeURIComponent;
+
+export const api = {
+  searchProducts: (q: string, page: number, pageSize = 25) =>
+    request<ProductSearchResult>(`/api/products?${new URLSearchParams({ q, page: String(page), pageSize: String(pageSize) })}`),
+
+  validateSkus: (skus: string[]) =>
+    request<{ existing: string[] }>("/api/products/validate", json("POST", { skus })),
+
+  getMedia: (sku: string) =>
+    request<{ entries: MediaEntry[] }>(`/api/media/${enc(sku)}`).then((r) => r.entries),
+
+  updateMedia: (sku: string, e: Pick<MediaEntry, "id" | "label" | "position" | "disabled" | "types">) =>
+    request(`/api/media/${enc(sku)}/${e.id}`, json("PUT", e)),
+
+  deleteMedia: (sku: string, id: number) =>
+    request(`/api/media/${enc(sku)}/${id}`, { method: "DELETE" }),
+
+  uploadMedia: (
+    sku: string,
+    file: File,
+    opts: { position: number; label?: string | null; types?: string[]; disabled?: boolean },
+  ) => {
+    const fd = new FormData();
+    fd.set("sku", sku);
+    fd.set("file", file);
+    fd.set("position", String(opts.position));
+    fd.set("label", opts.label ?? "");
+    fd.set("types", JSON.stringify(opts.types ?? []));
+    fd.set("disabled", String(Boolean(opts.disabled)));
+    return request<{ id: number }>("/api/media/upload", { method: "POST", body: fd });
+  },
+};
+
+/** Reintenta errores transitorios (red, 429, 5xx) con espera creciente. */
+export async function withRetry<T>(fn: () => Promise<T>, retries = 2): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      const status = err instanceof ApiError ? err.status : 0;
+      const transient = status === 0 || status === 429 || status >= 500;
+      if (!transient || attempt >= retries) throw err;
+      await new Promise((r) => setTimeout(r, 1000 * 2 ** attempt));
+    }
+  }
+}

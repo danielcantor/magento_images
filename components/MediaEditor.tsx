@@ -1,0 +1,306 @@
+"use client";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  arrayMove,
+  rectSortingStrategy,
+  sortableKeyboardCoordinates,
+  useSortable,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import { api } from "@/lib/api";
+import { replaceImage } from "@/lib/bulk";
+import { prepareImage } from "@/lib/imagePrep";
+import { ROLES, ROLE_LABELS, type MediaEntry } from "@/lib/types";
+
+interface Props {
+  sku: string;
+  name?: string;
+  onClose: () => void;
+  onChanged?: () => void;
+}
+
+const key = (e: MediaEntry, position: number) =>
+  JSON.stringify([e.label ?? "", e.disabled, [...e.types].sort(), position]);
+
+export default function MediaEditor({ sku, name, onClose, onChanged }: Props) {
+  const [original, setOriginal] = useState<MediaEntry[]>([]);
+  const [items, setItems] = useState<MediaEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const addInput = useRef<HTMLInputElement>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const entries = await api.getMedia(sku);
+      setOriginal(entries);
+      setItems(entries);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }, [sku]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  // Posición final = orden en pantalla (1, 2, 3…).
+  const dirtyIds = useMemo(() => {
+    const orig = new Map(original.map((e) => [e.id, key(e, e.position)]));
+    return new Set(items.filter((e, i) => orig.get(e.id) !== key(e, i + 1)).map((e) => e.id));
+  }, [items, original]);
+  const dirty = dirtyIds.size > 0;
+
+  const close = useCallback(() => {
+    if (dirty && !confirm("Hay cambios sin guardar. ¿Cerrar igualmente?")) return;
+    onClose();
+  }, [dirty, onClose]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && !busy && close();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [close, busy]);
+
+  const patch = (id: number, change: Partial<MediaEntry>) =>
+    setItems((list) => list.map((e) => (e.id === id ? { ...e, ...change } : e)));
+
+  const toggleRole = (id: number, role: string) =>
+    setItems((list) => {
+      const target = list.find((e) => e.id === id)!;
+      const turningOn = !target.types.includes(role);
+      return list.map((e) => {
+        if (e.id === id) return { ...e, types: turningOn ? [...e.types, role] : e.types.filter((t) => t !== role) };
+        // Un rol solo puede estar en una imagen.
+        return turningOn && e.types.includes(role) ? { ...e, types: e.types.filter((t) => t !== role) } : e;
+      });
+    });
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+
+  function onDragEnd(ev: DragEndEvent) {
+    const { active, over } = ev;
+    if (!over || active.id === over.id) return;
+    setItems((list) => {
+      const from = list.findIndex((e) => e.id === active.id);
+      const to = list.findIndex((e) => e.id === over.id);
+      return arrayMove(list, from, to);
+    });
+  }
+
+  async function run(label: string, fn: () => Promise<void>) {
+    setBusy(label);
+    setError(null);
+    try {
+      await fn();
+      await load();
+      onChanged?.();
+    } catch (e) {
+      setError((e as Error).message);
+      await load();
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  const save = () =>
+    run("Guardando…", async () => {
+      // Primero las que ganan roles, luego el resto, para que Magento no los reasigne mal.
+      const changed = items
+        .map((e, i) => ({ ...e, position: i + 1 }))
+        .filter((e) => dirtyIds.has(e.id))
+        .sort((a, b) => b.types.length - a.types.length);
+      for (const e of changed) await api.updateMedia(sku, e);
+    });
+
+  const remove = (e: MediaEntry) => {
+    if (!confirm(`¿Borrar esta imagen de ${sku}?`)) return;
+    void run("Borrando…", () => api.deleteMedia(sku, e.id).then(() => undefined));
+  };
+
+  const replace = (e: MediaEntry, file: File) => run("Reemplazando…", () => replaceImage(sku, e, file));
+
+  const addFiles = (files: FileList) =>
+    run("Subiendo…", async () => {
+      let pos = items.reduce((m, e) => Math.max(m, e.position), 0);
+      for (const f of Array.from(files)) {
+        const prepared = await prepareImage(f);
+        await api.uploadMedia(sku, prepared, { position: ++pos, types: items.length === 0 && pos === 1 ? ["image", "small_image", "thumbnail"] : [] });
+      }
+    });
+
+  const lockedReason = dirty ? "Guarda o descarta los cambios primero" : undefined;
+
+  return (
+    <>
+      <div className="drawer-backdrop" onClick={() => !busy && close()} />
+      <aside className="drawer" role="dialog" aria-label={`Imágenes de ${sku}`}>
+        <header>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontWeight: 700 }}>{sku}</div>
+            {name && <div className="muted small" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</div>}
+          </div>
+          <span className="spacer" />
+          <button onClick={close} disabled={!!busy} aria-label="Cerrar">
+            ✕
+          </button>
+        </header>
+        <div className="body stack">
+          {error && <div className="alert">{error}</div>}
+          {loading ? (
+            <p className="muted">Cargando imágenes…</p>
+          ) : items.length === 0 ? (
+            <div className="alert info">Este producto no tiene imágenes.</div>
+          ) : (
+            <>
+              <p className="muted small" style={{ margin: 0 }}>
+                Arrastra las imágenes para cambiar el orden. Pulsa un rol para asignarlo (cada rol solo puede estar en una imagen).
+              </p>
+              <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+                <SortableContext items={items.map((e) => e.id)} strategy={rectSortingStrategy}>
+                  <div className="gallery">
+                    {items.map((e, i) => (
+                      <MediaCard
+                        key={e.id}
+                        entry={e}
+                        index={i}
+                        dirty={dirtyIds.has(e.id)}
+                        disabled={!!busy}
+                        lockedReason={lockedReason}
+                        onLabel={(label) => patch(e.id, { label })}
+                        onHidden={(disabled) => patch(e.id, { disabled })}
+                        onRole={(r) => toggleRole(e.id, r)}
+                        onDelete={() => remove(e)}
+                        onReplace={(f) => replace(e, f)}
+                      />
+                    ))}
+                  </div>
+                </SortableContext>
+              </DndContext>
+            </>
+          )}
+        </div>
+        <footer>
+          <input
+            ref={addInput}
+            type="file"
+            accept="image/jpeg,image/png,image/gif,image/webp"
+            multiple
+            hidden
+            onChange={(e) => {
+              if (e.target.files?.length) void addFiles(e.target.files);
+              e.target.value = "";
+            }}
+          />
+          <button onClick={() => addInput.current?.click()} disabled={!!busy || dirty} title={lockedReason}>
+            + Añadir imágenes
+          </button>
+          <span className="spacer" />
+          {busy && <span className="muted">{busy}</span>}
+          <button onClick={() => setItems(original)} disabled={!dirty || !!busy}>
+            Descartar
+          </button>
+          <button className="primary" onClick={save} disabled={!dirty || !!busy}>
+            Guardar cambios{dirty ? ` (${dirtyIds.size})` : ""}
+          </button>
+        </footer>
+      </aside>
+    </>
+  );
+}
+
+function MediaCard(props: {
+  entry: MediaEntry;
+  index: number;
+  dirty: boolean;
+  disabled: boolean;
+  lockedReason?: string;
+  onLabel: (v: string) => void;
+  onHidden: (v: boolean) => void;
+  onRole: (r: string) => void;
+  onDelete: () => void;
+  onReplace: (f: File) => void;
+}) {
+  const { entry: e, index, dirty, disabled, lockedReason } = props;
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: e.id, disabled });
+  const fileInput = useRef<HTMLInputElement>(null);
+
+  return (
+    <div
+      ref={setNodeRef}
+      className={`media-card${dirty ? " dirty" : ""}${e.disabled ? " hidden-img" : ""}`}
+      style={{ transform: CSS.Transform.toString(transform), transition, zIndex: isDragging ? 5 : undefined, opacity: isDragging ? 0.8 : 1 }}
+    >
+      <div className="media-img" {...attributes} {...listeners} aria-label={`Imagen ${index + 1}, arrastra para mover`}>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={e.url} alt={e.label ?? ""} loading="lazy" />
+        <span className="pos">{index + 1}</span>
+      </div>
+      <div className="media-body">
+        <div className="roles">
+          {ROLES.map((r) => (
+            <button
+              key={r}
+              type="button"
+              className={`role${e.types.includes(r) ? " on" : ""}`}
+              onClick={() => props.onRole(r)}
+              disabled={disabled}
+              aria-pressed={e.types.includes(r)}
+            >
+              {ROLE_LABELS[r]}
+            </button>
+          ))}
+        </div>
+        <input
+          type="text"
+          placeholder="Texto alternativo (alt)"
+          value={e.label ?? ""}
+          maxLength={255}
+          onChange={(ev) => props.onLabel(ev.target.value)}
+          disabled={disabled}
+        />
+        <div className="row">
+          <label className="check small">
+            <input type="checkbox" checked={e.disabled} onChange={(ev) => props.onHidden(ev.target.checked)} disabled={disabled} />
+            Ocultar
+          </label>
+          <span className="spacer" />
+          <input
+            ref={fileInput}
+            type="file"
+            accept="image/jpeg,image/png,image/gif,image/webp"
+            hidden
+            onChange={(ev) => {
+              const f = ev.target.files?.[0];
+              if (f) props.onReplace(f);
+              ev.target.value = "";
+            }}
+          />
+          <button className="link small" onClick={() => fileInput.current?.click()} disabled={disabled || !!lockedReason} title={lockedReason}>
+            Reemplazar
+          </button>
+          <button className="link small" style={{ color: "var(--err)" }} onClick={props.onDelete} disabled={disabled || !!lockedReason} title={lockedReason}>
+            Borrar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

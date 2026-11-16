@@ -48,6 +48,33 @@ Web para **subir, ordenar, editar y borrar imágenes de productos de Magento 2 d
 
 > En producción, si no hay `DASHBOARD_PASSWORD` ni Supabase configurados, el dashboard queda bloqueado. Así la API de escritura nunca queda expuesta.
 
+## Login con usuarios del Admin de Magento (recomendado)
+
+Cada persona entra con **su usuario, contraseña y código de Google Authenticator del Admin de Magento**.
+
+- El dashboard pide a Magento un token de admin para esa persona y lo guarda cifrado (AES-GCM) en una cookie `httpOnly`. El navegador nunca lo ve en claro.
+- Se respetan los **roles y permisos** de cada usuario, y Magento registra quién hizo cada cambio.
+- `MAGENTO_TOKEN` deja de usarse.
+
+En Vercel:
+
+| Variable | Valor |
+|---|---|
+| `AUTH_MODE` | `magento` |
+| `MAGENTO_BASE_URL` | `https://tutienda.com` |
+| `SESSION_SECRET` | texto aleatorio de 16+ caracteres (`openssl rand -hex 32`), obligatorio |
+| `MAGENTO_ADMIN_TOKEN_HOURS` | opcional, por defecto `4` |
+| `MAGENTO_ADMIN_2FA` | opcional: `off` si tu Magento no usa 2FA en el Admin |
+
+Requisitos en Magento:
+
+- **Rol con permiso**: el usuario necesita un rol con acceso a **Catalog → Inventory → Products** (*System → Permissions → User Roles*). Si no lo tiene, el dashboard muestra «Tu usuario de Magento no tiene permiso…».
+- **Google Authenticator**: cada usuario debe tenerlo configurado. La primera vez se activa entrando al Admin de Magento.
+- **Duración de la sesión**: la sesión dura lo mismo que el token de admin de Magento. Si cambias *Stores → Configuration → Services → OAuth → Access Token Expiration → Admin Token Lifetime*, pon el mismo número de horas en `MAGENTO_ADMIN_TOKEN_HOURS`.
+- **Bloqueo por intentos**: Magento bloquea temporalmente la cuenta tras varios intentos fallidos, igual que en el Admin.
+
+`AUTH_MODE=magento` tiene prioridad sobre `DASHBOARD_PASSWORD` y Supabase.
+
 ## 3. (Opcional) Login por usuario con Supabase
 
 Úsalo si varias personas van a usar el dashboard y quieres saber quién hizo cada lote.

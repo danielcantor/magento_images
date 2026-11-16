@@ -8,7 +8,7 @@ export default function LoginPage() {
     <div className="login">
       <div className="card">
         <h1>Imágenes Magento</h1>
-        <LoginForm mode={getAuthMode()} />
+        <LoginForm mode={getAuthMode()} otpRequired={process.env.MAGENTO_ADMIN_2FA !== "off"} />
       </div>
     </div>
   );

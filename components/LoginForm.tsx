@@ -3,17 +3,20 @@ import { useState } from "react";
 import type { AuthMode } from "@/lib/authMode";
 import { getSupabase } from "@/lib/supabaseBrowser";
 
-export default function LoginForm({ mode }: { mode: AuthMode }) {
+export default function LoginForm({ mode, otpRequired = true }: { mode: AuthMode; otpRequired?: boolean }) {
   const [email, setEmail] = useState("");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [otp, setOtp] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   if (mode === "none") {
     return (
       <p className="muted">
-        No hay acceso configurado. Define <code>DASHBOARD_PASSWORD</code> (y <code>SESSION_SECRET</code>) o las
-        variables de Supabase. En local puedes entrar directamente: <a href="/products">ir al dashboard</a>.
+        No hay acceso configurado. Define <code>AUTH_MODE=magento</code>, <code>DASHBOARD_PASSWORD</code> (con{" "}
+        <code>SESSION_SECRET</code>) o las variables de Supabase. En local puedes entrar directamente:{" "}
+        <a href="/products">ir al dashboard</a>.
       </p>
     );
   }
@@ -30,19 +33,37 @@ export default function LoginForm({ mode }: { mode: AuthMode }) {
         const res = await fetch("/api/auth/login", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ password }),
+          body: JSON.stringify(mode === "magento" ? { username, password, otp } : { password }),
         });
         if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? "Error al entrar");
       }
       window.location.href = "/products";
     } catch (err) {
       setError((err as Error).message);
+      if (mode === "magento") setOtp(""); // el código es de un solo uso
       setBusy(false);
     }
   }
 
   return (
     <form onSubmit={submit}>
+      {mode === "magento" && (
+        <>
+          <p className="muted small" style={{ margin: 0 }}>
+            Entra con tu usuario del Admin de Magento.
+          </p>
+          <input
+            type="text"
+            placeholder="Usuario de Magento"
+            autoComplete="username"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            required
+            autoFocus
+            aria-label="Usuario de Magento"
+          />
+        </>
+      )}
       {mode === "supabase" && (
         <input type="email" placeholder="Email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
       )}
@@ -54,7 +75,22 @@ export default function LoginForm({ mode }: { mode: AuthMode }) {
         onChange={(e) => setPassword(e.target.value)}
         required
         autoFocus={mode === "password"}
+        aria-label="Contraseña"
       />
+      {mode === "magento" && otpRequired && (
+        <input
+          type="text"
+          placeholder="Código de Google Authenticator"
+          inputMode="numeric"
+          autoComplete="one-time-code"
+          pattern="\d{6}"
+          maxLength={6}
+          value={otp}
+          onChange={(e) => setOtp(e.target.value.replace(/\D/g, ""))}
+          required
+          aria-label="Código de Google Authenticator (6 dígitos)"
+        />
+      )}
       {error && <div className="alert">{error}</div>}
       <button className="primary" disabled={busy}>
         {busy ? "Entrando…" : "Entrar"}

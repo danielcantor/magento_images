@@ -1,18 +1,25 @@
+import { cookies } from "next/headers";
 import { getAuthMode } from "@/lib/authMode";
+import { MAGENTO_SESSION_COOKIE, openMagentoSession } from "@/lib/session";
 import Nav from "@/components/Nav";
 
 export const dynamic = "force-dynamic";
 
-export default function DashboardLayout({ children }: { children: React.ReactNode }) {
+export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const mode = getAuthMode();
-  const missingMagento = !process.env.MAGENTO_BASE_URL || !process.env.MAGENTO_TOKEN;
+  const username =
+    mode === "magento"
+      ? (await openMagentoSession((await cookies()).get(MAGENTO_SESSION_COOKIE)?.value).catch(() => null))?.username
+      : null;
+  const missingMagento = !process.env.MAGENTO_BASE_URL || (mode !== "magento" && !process.env.MAGENTO_TOKEN);
   return (
     <>
-      <Nav mode={mode} />
+      <Nav mode={mode} username={username} />
       <main>
         {missingMagento && (
           <div className="alert" style={{ marginBottom: 16 }}>
-            Faltan las variables <b>MAGENTO_BASE_URL</b> y/o <b>MAGENTO_TOKEN</b>. Configúralas en Vercel
+            Faltan variables de Magento: <b>MAGENTO_BASE_URL</b>
+            {mode !== "magento" && <> y/o <b>MAGENTO_TOKEN</b></>}. Configúralas en Vercel
             (Settings → Environment Variables) o en <code>.env.local</code>.
           </div>
         )}

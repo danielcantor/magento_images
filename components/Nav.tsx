@@ -4,7 +4,7 @@ import { usePathname } from "next/navigation";
 import type { AuthMode } from "@/lib/authMode";
 import { getSupabase } from "@/lib/supabaseBrowser";
 
-export default function Nav({ mode }: { mode: AuthMode }) {
+export default function Nav({ mode, username }: { mode: AuthMode; username?: string | null }) {
   const path = usePathname();
   const links = [
     { href: "/products", label: "Productos" },
@@ -31,6 +31,11 @@ export default function Nav({ mode }: { mode: AuthMode }) {
           </Link>
         ))}
       </nav>
+      {username && (
+        <span className="muted small user" title="Usuario de Magento conectado">
+          👤 {username}
+        </span>
+      )}
       {mode !== "none" && (
         <button className="link" onClick={logout}>
           Salir

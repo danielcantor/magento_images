@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { getAuthMode } from "@/lib/authMode";
-import { SESSION_COOKIE, verifySessionToken } from "@/lib/session";
+import { MAGENTO_SESSION_COOKIE, openMagentoSession, SESSION_COOKIE, verifySessionToken } from "@/lib/session";
 
 function deny(req: NextRequest, message: string) {
   if (req.nextUrl.pathname.startsWith("/api/")) {
@@ -22,6 +22,14 @@ export async function middleware(req: NextRequest) {
       return deny(req, "Configura DASHBOARD_PASSWORD o Supabase para usar el dashboard.");
     }
     return NextResponse.next();
+  }
+
+  if (mode === "magento") {
+    const session = await openMagentoSession(req.cookies.get(MAGENTO_SESSION_COOKIE)?.value).catch(() => null);
+    if (session) return NextResponse.next();
+    const res = deny(req, "Sesión caducada. Vuelve a entrar.");
+    res.cookies.delete(MAGENTO_SESSION_COOKIE);
+    return res;
   }
 
   if (mode === "password") {

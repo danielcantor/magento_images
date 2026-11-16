@@ -1,6 +1,8 @@
 // Cliente de la REST API de Magento 2. Solo se usa en el servidor:
 // el token nunca llega al navegador.
 import "server-only";
+import { getAuthMode } from "./authMode";
+import { getRequestToken } from "./requestToken";
 import type { MediaEntry, ProductRow, ProductSearchResult } from "./types";
 
 export class MagentoError extends Error {
@@ -11,23 +13,17 @@ export class MagentoError extends Error {
 
 interface Config {
   baseUrl: string;
-  token: string;
   storeCode: string;
   mediaUrl: string;
 }
 
 export function getConfig(): Config {
   const baseUrl = (process.env.MAGENTO_BASE_URL ?? "").replace(/\/+$/, "");
-  const token = process.env.MAGENTO_TOKEN ?? "";
-  if (!baseUrl || !token) {
-    throw new MagentoError(
-      "Faltan MAGENTO_BASE_URL o MAGENTO_TOKEN en las variables de entorno.",
-      500,
-    );
+  if (!baseUrl) {
+    throw new MagentoError("Falta MAGENTO_BASE_URL en las variables de entorno.", 500);
   }
   return {
     baseUrl,
-    token,
     storeCode: process.env.MAGENTO_STORE_CODE || "all",
     mediaUrl: (process.env.MAGENTO_MEDIA_URL || `${baseUrl}/media/catalog/product`).replace(/\/+$/, ""),
   };
@@ -47,23 +43,41 @@ export function formatMagentoMessage(body: unknown): string | null {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+export const NO_PERMISSION_MESSAGE =
+  "Tu usuario de Magento no tiene permiso para esto (Catalog > Products) o la sesión caducó en Magento. Vuelve a entrar.";
+
+interface FetchOptions {
+  /** false = petición sin token (login). Por defecto se usa el token de la petición. */
+  auth?: boolean;
+}
+
 export async function magentoFetch<T>(
   path: string,
   init: { method?: string; body?: unknown } = {},
   retries = 3,
+  opts: FetchOptions = {},
 ): Promise<T> {
   const cfg = getConfig();
   const url = `${cfg.baseUrl}/rest/${cfg.storeCode}/V1${path}`;
+  const userMode = getAuthMode() === "magento";
+
+  const headers: Record<string, string> = { "Content-Type": "application/json", Accept: "application/json" };
+  if (opts.auth !== false) {
+    const token = await getRequestToken();
+    if (!token) {
+      throw userMode
+        ? new MagentoError("Sesión caducada. Vuelve a entrar.", 401)
+        : new MagentoError("Falta MAGENTO_TOKEN en las variables de entorno.", 500);
+    }
+    headers.Authorization = `Bearer ${token}`;
+  }
+
   for (let attempt = 0; ; attempt++) {
     let res: Response;
     try {
       res = await fetch(url, {
         method: init.method ?? "GET",
-        headers: {
-          Authorization: `Bearer ${cfg.token}`,
-          "Content-Type": "application/json",
-          Accept: "application/json",
-        },
+        headers,
         body: init.body === undefined ? undefined : JSON.stringify(init.body),
         cache: "no-store",
       });
@@ -88,6 +102,11 @@ export async function magentoFetch<T>(
       body = text;
     }
     if (!res.ok) {
+      // Con usuario de Magento, un 401 con sesión vigente es falta de permisos (o token
+      // revocado en Magento). Se devuelve 403 para no entrar en un bucle de logins.
+      if (res.status === 401 && opts.auth !== false && userMode) {
+        throw new MagentoError(NO_PERMISSION_MESSAGE, 403);
+      }
       const msg =
         formatMagentoMessage(body) ??
         (res.status === 401
@@ -97,6 +116,46 @@ export async function magentoFetch<T>(
     }
     return body as T;
   }
+}
+
+/**
+ * Pide un token de admin con usuario y contraseña de Magento.
+ * Con código de Google Authenticator usa el endpoint de 2FA.
+ */
+export async function getAdminToken(username: string, password: string, otp?: string): Promise<string> {
+  const path = otp ? "/tfa/provider/google/authenticate" : "/integration/admin/token";
+  const body = otp ? { username, password, otp } : { username, password };
+  try {
+    const token = await magentoFetch<string>(path, { method: "POST", body }, 1, { auth: false });
+    if (typeof token !== "string" || !token) throw new MagentoError("Magento no devolvió un token.", 502);
+    return token;
+  } catch (err) {
+    if (!(err instanceof MagentoError) || err.status >= 500) throw err;
+    throw new MagentoError(translateLoginError(err.message, Boolean(otp)), 401);
+  }
+}
+
+export function translateLoginError(message: string, withOtp: boolean): string {
+  const m = message.toLowerCase();
+  // Mensaje estándar de Magento para credenciales malas o cuenta bloqueada temporalmente.
+  if (m.includes("sign-in was incorrect")) {
+    return "Usuario o contraseña incorrectos (o la cuenta está bloqueada temporalmente por intentos fallidos).";
+  }
+  if (m.includes("not configured") || m.includes("not been configured") || m.includes("provider is not")) {
+    return "Este usuario aún no configuró Google Authenticator. Entra una vez en el Admin de Magento para activarlo.";
+  }
+  if (withOtp && (m.includes("invalid code") || m.includes("code"))) {
+    return "El código de Google Authenticator no es válido. Usa el código actual de la app.";
+  }
+  if (m.includes("2fa") || m.includes("two-factor") || m.includes("tfa")) {
+    return "Tu Magento exige verificación en dos pasos: escribe el código de Google Authenticator.";
+  }
+  if (m.includes("does not match any route")) {
+    return withOtp
+      ? "Tu Magento no tiene la verificación en dos pasos por API. Deja vacío el código."
+      : "Magento no acepta este método de login.";
+  }
+  return "Usuario o contraseña incorrectos.";
 }
 
 const enc = encodeURIComponent;

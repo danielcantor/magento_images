@@ -167,3 +167,5 @@ tr.clickable { cursor: pointer; }
 tr.clickable:focus-visible td { outline: none; background: var(--surface-2); }
 tr.clickable:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 @media (max-width: 640px) { .filters label { flex: 1 1 100%; justify-content: space-between; } .filters select { max-width: 60%; } }
+.alert.warn-box { background: var(--warn-bg); color: var(--text); display: flex; gap: 12px; align-items: center; flex-wrap: wrap; justify-content: space-between; }
+.alert.warn-box ul { padding-left: 18px; }

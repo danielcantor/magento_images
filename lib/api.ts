@@ -34,6 +34,16 @@ export const api = {
     return request<ProductSearchResult>(`/api/products?${p}`);
   },
 
+  storeDiffs: (sku: string) =>
+    request<{ stores: { storeCode: string; storeName: string; diffs: { id: number; fields: string[] }[] }[] }>(
+      `/api/media/${enc(sku)}/stores`,
+    ).then((r) => r.stores),
+
+  syncStores: (sku: string) =>
+    request<{ storesSynced: string[]; entriesUpdated: number; stillDifferent: string[] }>(`/api/media/${enc(sku)}/stores`, {
+      method: "POST",
+    }),
+
   roles: () => request<{ roles: MediaRole[]; firstImageRoles: string[] }>("/api/roles"),
 
   websites: () => request<{ websites: Website[] }>("/api/stores").then((r) => r.websites),

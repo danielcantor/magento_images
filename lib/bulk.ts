@@ -56,6 +56,25 @@ function tracker(total: number, cb: JobCallbacks) {
 
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
+/** Iguala las tiendas de un SKU a lo general y lo deja en el log (no cuenta como paso). */
+async function syncSkuStores(sku: string, log: (line: LogLine) => void) {
+  try {
+    const r = await withRetry(() => api.syncStores(sku));
+    if (r.stillDifferent.length) {
+      log({ sku, action: "tiendas", status: "error", message: `Siguen distintas: ${r.stillDifferent.join(", ")}` });
+    } else {
+      log({
+        sku,
+        action: "tiendas",
+        status: "ok",
+        message: r.storesSynced.length ? `Igualadas a lo general: ${r.storesSynced.join(", ")}` : "Ya coincidían con lo general",
+      });
+    }
+  } catch (e) {
+    log({ sku, action: "tiendas", status: "error", message: `No se pudieron igualar las tiendas: ${msg(e)}` });
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Modo bulk: las subidas se encolan en Magento y quedan en
 // System > Action Logs > Bulk Actions. Luego se sigue su estado.
@@ -84,8 +103,9 @@ function wait(ms: number, signal?: AbortSignal) {
   });
 }
 
-async function enqueueAndTrack(items: QueueItem[], step: Step, cb: JobCallbacks, q: QueueSettings) {
-  if (!items.length) return;
+async function enqueueAndTrack(items: QueueItem[], step: Step, cb: JobCallbacks, q: QueueSettings): Promise<Set<string>> {
+  const completed = new Set<string>();
+  if (!items.length) return completed;
   const tracking: { uuid: string; items: QueueItem[]; done: Set<number> }[] = [];
   const packs = packItems(items.map((i) => ({ ...i, size: i.file.size })), PACK_LIMITS);
 
@@ -125,6 +145,7 @@ async function enqueueAndTrack(items: QueueItem[], step: Step, cb: JobCallbacks,
           if (i >= t.items.length || t.done.has(i) || op.state === "open") return;
           t.done.add(i);
           const it = t.items[i];
+          if (op.state === "complete") completed.add(it.sku);
           step({
             sku: it.sku,
             action: "subir",
@@ -163,6 +184,16 @@ async function enqueueAndTrack(items: QueueItem[], step: Step, cb: JobCallbacks,
     step({ sku: "—", action: "detenido", status: "ok", message: "Se dejó de seguir el estado. Lo ya encolado se procesará igualmente en Magento (ver Bulk Actions)." }, false);
   }
   cb.onPhase?.(null);
+  return completed;
+}
+
+/** Iguala las tiendas de varios SKU (fase final de los trabajos masivos). */
+async function syncManyStores(skus: Iterable<string>, step: Step, cb: JobCallbacks) {
+  const list = [...new Set(skus)];
+  if (!list.length || cb.signal?.aborted) return;
+  cb.onPhase?.(`Igualando tiendas de ${list.length} producto(s)…`);
+  await runPool(list, cb.concurrency ?? 4, (sku) => syncSkuStores(sku, (l) => step(l, false)), cb.signal);
+  cb.onPhase?.(null);
 }
 
 export async function runBulkUpload(
@@ -174,6 +205,8 @@ export async function runBulkUpload(
     firstImageRoles?: string[];
     uploadMode?: UploadMode;
     queue?: QueueSettings;
+    /** Igualar las tiendas a lo general al terminar cada SKU. */
+    syncStores?: boolean;
   },
   cb: JobCallbacks,
 ): Promise<void> {
@@ -182,6 +215,7 @@ export async function runBulkUpload(
   const queued: QueueItem[] = [];
   const useQueue = opts.uploadMode === "bulk";
   const firstRoles = opts.firstImageRoles?.length ? opts.firstImageRoles : MAIN_ROLES;
+  const touched: string[] = [];
 
   await runPool(
     groups,
@@ -232,20 +266,26 @@ export async function runBulkUpload(
             }),
           );
           step({ sku, action: "subir", fileName: f.fileName, status: "ok" });
+          if (!touched.includes(sku)) touched.push(sku);
         } catch (e) {
           step({ sku, action: "subir", fileName: f.fileName, status: "error", message: msg(e) });
         }
       }
+      if (opts.mode === "replace" && existing.length && !touched.includes(sku)) touched.push(sku);
     },
     cb.signal,
   );
 
-  if (useQueue) await enqueueAndTrack(queued, step, cb, opts.queue ?? DEFAULT_QUEUE);
+  if (useQueue) {
+    const done = await enqueueAndTrack(queued, step, cb, opts.queue ?? DEFAULT_QUEUE);
+    done.forEach((sku) => !touched.includes(sku) && touched.push(sku));
+  }
+  if (opts.syncStores) await syncManyStores(touched, step, cb);
 }
 
 export async function runBulkDelete(
   skus: string[],
-  opts: { onlyWithoutRoles: boolean },
+  opts: { onlyWithoutRoles: boolean; syncStores?: boolean },
   cb: JobCallbacks,
 ): Promise<void> {
   const step = tracker(skus.length, cb);
@@ -261,6 +301,7 @@ export async function runBulkDelete(
           await withRetry(() => api.deleteMedia(sku, e.id));
         }
         step({ sku, action: "borrar", status: "ok", message: `${targets.length} imagen(es) borradas` });
+        if (opts.syncStores && targets.length) await syncSkuStores(sku, cb.onLog);
       } catch (e) {
         step({ sku, action: "borrar", status: "error", message: msg(e) });
       }
@@ -283,9 +324,9 @@ export async function runSharedUpload(
   skus: string[],
   images: SharedImage[],
   cb: JobCallbacks,
-  opts: { uploadMode?: UploadMode; queue?: QueueSettings } = {},
+  opts: { uploadMode?: UploadMode; queue?: QueueSettings; syncStores?: boolean } = {},
 ): Promise<void> {
-  if (opts.uploadMode === "bulk") return runSharedUploadQueued(skus, images, cb, opts.queue ?? DEFAULT_QUEUE);
+  if (opts.uploadMode === "bulk") return runSharedUploadQueued(skus, images, cb, opts.queue ?? DEFAULT_QUEUE, Boolean(opts.syncStores));
   const step = tracker(skus.length, cb);
 
   // Se comprime una sola vez y se reutiliza en todos los SKU.
@@ -328,6 +369,7 @@ export async function runSharedUpload(
           }
         }
         step({ sku, action: "anexar", status: "ok", message: `${uploaded} imagen(es) anexadas, ${moved} movidas` });
+        if (opts.syncStores) await syncSkuStores(sku, cb.onLog);
       } catch (e) {
         const partial = uploaded || moved ? ` (hecho: ${uploaded} anexadas, ${moved} movidas)` : "";
         step({ sku, action: "anexar", status: "error", message: msg(e) + partial });
@@ -341,7 +383,7 @@ export async function runSharedUpload(
  * Versión con cola: primero corre las imágenes existentes (inmediato) y luego
  * encola las nuevas en su posición. Progreso por imagen y SKU.
  */
-async function runSharedUploadQueued(skus: string[], images: SharedImage[], cb: JobCallbacks, q: QueueSettings) {
+async function runSharedUploadQueued(skus: string[], images: SharedImage[], cb: JobCallbacks, q: QueueSettings, sync: boolean) {
   const step = tracker(skus.length * images.length, cb);
   const failAll = (sku: string, message: string) =>
     images.forEach((img) => step({ sku, action: "anexar", fileName: img.file.name, status: "error", message }));
@@ -379,7 +421,8 @@ async function runSharedUploadQueued(skus: string[], images: SharedImage[], cb: 
     },
     cb.signal,
   );
-  await enqueueAndTrack(queued, step, cb, q);
+  const done = await enqueueAndTrack(queued, step, cb, q);
+  if (sync) await syncManyStores(done, step, cb);
 }
 
 /** Reemplaza una imagen conservando roles, posición, alt y visibilidad. */
@@ -407,4 +450,31 @@ export function downloadText(name: string, text: string, type = "text/csv") {
   a.download = name;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+/** Iguala las tiendas a lo general en varios SKU (acción masiva de Productos). */
+export async function runStoreSync(skus: string[], cb: JobCallbacks): Promise<void> {
+  const step = tracker(skus.length, cb);
+  await runPool(
+    skus,
+    cb.concurrency ?? 3,
+    async (sku) => {
+      try {
+        const r = await withRetry(() => api.syncStores(sku));
+        step(
+          r.stillDifferent.length
+            ? { sku, action: "igualar tiendas", status: "error", message: `Siguen distintas: ${r.stillDifferent.join(", ")}` }
+            : {
+                sku,
+                action: "igualar tiendas",
+                status: "ok",
+                message: r.storesSynced.length ? `${r.storesSynced.join(", ")} (${r.entriesUpdated} cambios)` : "Ya coincidían",
+              },
+        );
+      } catch (e) {
+        step({ sku, action: "igualar tiendas", status: "error", message: msg(e) });
+      }
+    },
+    cb.signal,
+  );
 }

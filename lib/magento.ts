@@ -2,6 +2,7 @@
 // el token nunca llega al navegador.
 import "server-only";
 import { getAuthMode } from "./authMode";
+import { diffEntries, planStoreUpdates, type StoreDiff } from "./storeSync";
 import { getRequestToken } from "./requestToken";
 import { FALLBACK_ROLES, type MediaEntry, type MediaRole, type ProductRow, type ProductSearchResult, type Website } from "./types";
 
@@ -51,6 +52,8 @@ interface FetchOptions {
   auth?: boolean;
   /** "async/bulk/" para la API asíncrona: /rest/{store}/async/bulk/V1/... */
   prefix?: "" | "async/bulk/";
+  /** Código de store view; por defecto MAGENTO_STORE_CODE ("all" = general). */
+  store?: string;
 }
 
 export async function magentoFetch<T>(
@@ -60,7 +63,7 @@ export async function magentoFetch<T>(
   opts: FetchOptions = {},
 ): Promise<T> {
   const cfg = getConfig();
-  const url = `${cfg.baseUrl}/rest/${cfg.storeCode}/${opts.prefix ?? ""}V1${path}`;
+  const url = `${cfg.baseUrl}/rest/${encodeURIComponent(opts.store ?? cfg.storeCode)}/${opts.prefix ?? ""}V1${path}`;
   const userMode = getAuthMode() === "magento";
 
   const headers: Record<string, string> = { "Content-Type": "application/json", Accept: "application/json" };
@@ -324,8 +327,8 @@ export async function findExistingSkus(skus: string[]): Promise<string[]> {
   return found;
 }
 
-export async function getMedia(sku: string): Promise<MediaEntry[]> {
-  const entries = await magentoFetch<MediaEntry[]>(`/products/${enc(sku)}/media`);
+export async function getMedia(sku: string, store?: string): Promise<MediaEntry[]> {
+  const entries = await magentoFetch<MediaEntry[]>(`/products/${enc(sku)}/media`, {}, 3, { store });
   return withUrls(entries);
 }
 
@@ -370,6 +373,7 @@ export async function updateMedia(
   sku: string,
   id: number,
   input: { label: string | null; position: number; disabled: boolean; types: string[] },
+  store?: string,
 ): Promise<void> {
   await magentoFetch<boolean>(`/products/${enc(sku)}/media/${id}`, {
     method: "PUT",
@@ -383,7 +387,7 @@ export async function updateMedia(
         types: input.types,
       },
     },
-  });
+  }, 3, { store });
 }
 
 export async function deleteMedia(sku: string, id: number): Promise<void> {
@@ -448,4 +452,47 @@ export async function getBulkStatus(uuid: string): Promise<BulkStatusResult> {
       message: o.result_message ?? null,
     })),
   };
+}
+
+// ---------------------------------------------------------------------------
+// Igualar las tiendas a lo general. La REST API no permite volver a
+// «Use Default Value», así que se copian los valores generales en cada tienda.
+
+/** Store views (sin admin) de todos los sitios. */
+export async function getStoreViews(): Promise<{ code: string; name: string }[]> {
+  return (await getWebsites()).flatMap((w) => w.stores.map((st) => ({ code: st.code, name: st.name })));
+}
+
+export async function getStoreDiffs(sku: string): Promise<StoreDiff[]> {
+  const [general, stores] = await Promise.all([getMedia(sku), getStoreViews()]);
+  const out: StoreDiff[] = [];
+  for (const st of stores) {
+    const media = await getMedia(sku, st.code);
+    const diffs = diffEntries(general, media);
+    if (diffs.length) out.push({ storeCode: st.code, storeName: st.name, diffs });
+  }
+  return out;
+}
+
+export interface SyncResult {
+  storesSynced: string[];
+  entriesUpdated: number;
+  /** Tiendas que siguen distintas tras sincronizar (no debería pasar). */
+  stillDifferent: string[];
+}
+
+export async function syncStores(sku: string): Promise<SyncResult> {
+  const general = await getMedia(sku);
+  const diffs = await getStoreDiffs(sku);
+  const result: SyncResult = { storesSynced: [], entriesUpdated: 0, stillDifferent: [] };
+  for (const d of diffs) {
+    for (const entry of planStoreUpdates(general, d.diffs)) {
+      await updateMedia(sku, entry.id, entry, d.storeCode);
+      result.entriesUpdated++;
+    }
+    result.storesSynced.push(d.storeName);
+    const after = await getMedia(sku, d.storeCode);
+    if (diffEntries(general, after).length) result.stillDifferent.push(d.storeName);
+  }
+  return result;
 }

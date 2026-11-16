@@ -4,6 +4,7 @@ import { useDropzone } from "react-dropzone";
 import { api } from "@/lib/api";
 import { runBulkUpload, type QueueSettings, type UploadMode } from "@/lib/bulk";
 import QueueNotice from "./QueueNotice";
+import SyncStoresOption from "./SyncStoresOption";
 import { useRoles } from "./useRoles";
 import { candidateSkus, matchFiles, parseFileName, type Separator } from "@/lib/skuMatcher";
 import JobProgress from "./JobProgress";
@@ -11,7 +12,7 @@ import { useJob } from "./useJob";
 
 const MAX_FILE_MB = 25;
 
-export default function BulkUploadView({ uploadMode = "direct", queue }: { uploadMode?: UploadMode; queue?: QueueSettings }) {
+export default function BulkUploadView({ uploadMode = "direct", queue, syncStoresEnabled = false }: { uploadMode?: UploadMode; queue?: QueueSettings; syncStoresEnabled?: boolean }) {
   const [files, setFiles] = useState<File[]>([]);
   const [separator, setSeparator] = useState<Separator>("_");
   const [mode, setMode] = useState<"append" | "replace">("append");
@@ -21,6 +22,7 @@ export default function BulkUploadView({ uploadMode = "direct", queue }: { uploa
   const [validating, setValidating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const job = useJob();
+  const [syncStores, setSyncStores] = useState(true);
   const { firstImageRoles, labelOf } = useRoles();
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
@@ -84,7 +86,7 @@ export default function BulkUploadView({ uploadMode = "direct", queue }: { uploa
     )
       return;
     await job.start(mode === "replace" ? "subida-reemplazar" : "subida-añadir", (cb) =>
-      runBulkUpload(match.groups, { mode, assignRoles, firstImageRoles, uploadMode, queue }, cb),
+      runBulkUpload(match.groups, { mode, assignRoles, firstImageRoles, uploadMode, queue, syncStores: syncStoresEnabled && syncStores }, cb),
     );
   }
 
@@ -123,6 +125,7 @@ export default function BulkUploadView({ uploadMode = "direct", queue }: { uploa
             <input type="checkbox" checked={assignRoles} onChange={(e) => setAssignRoles(e.target.checked)} disabled={job.running} />
             La primera imagen de cada SKU recibirá los roles: {firstImageRoles.map(labelOf).join(", ")}
           </label>
+          {syncStoresEnabled && <SyncStoresOption checked={syncStores} onChange={setSyncStores} disabled={job.running} />}
           {mode === "append" && assignRoles && (
             <span className="muted small">
               Si el producto ya tiene imagen base, solo se cambia cuando subes la posición 1 (<code>SKU.jpg</code> o <code>SKU{separator}1.jpg</code>).

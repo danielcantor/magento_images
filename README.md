@@ -93,6 +93,23 @@ Requisitos en Magento:
 - **Permiso Bulk Actions**: el rol del usuario necesita también **System → Action Logs → Bulk Actions** para que el dashboard pueda leer el estado.
 - **Tamaño de envío**: PHP debe aceptar envíos de hasta `MAGENTO_BULK_MAX_MB` (16 MB por defecto, en `post_max_size`).
 
+## Imágenes iguales en todas las tiendas (store views)
+
+En Magento, una store view puede tener **valores propios** de imágenes: roles, alt, posición y «ocultar». El dashboard guarda a nivel general, así que una tienda con valores propios seguiría mostrando lo anterior.
+
+Con `MAGENTO_SYNC_STORES=1`:
+
+- **Editor**: al abrir un producto, avisa si alguna tienda tiene valores distintos de los generales y ofrece «Igualar todas las tiendas a lo general». Después de cada cambio (guardar, subir, reemplazar, borrar), iguala las tiendas automáticamente.
+- **Subida masiva, «Imagen a varios SKU» y borrado masivo**: tienen la casilla «Igualar todas las tiendas a lo general», marcada por defecto. Se aplica al terminar cada producto; en modo cola, cuando Magento termina.
+- **Productos**: la acción masiva «Igualar tiendas» arregla los productos seleccionados.
+
+Cómo funciona: la REST API de Magento **no permite volver a «Use Default Value»** en una tienda. Por eso el dashboard **copia los valores generales en cada tienda que difiere**, y solo en las imágenes que difieren.
+
+Hay dos consecuencias:
+
+- **Las tiendas no heredan cambios hechos en el Admin.** Quedan con valores propios iguales a lo general. Si después cambias una imagen a nivel general **desde el Admin**, las tiendas no lo heredan. Los cambios hechos desde el dashboard, en cambio, siempre las vuelven a igualar.
+- **Riesgo según la versión de Magento.** Al guardar en una tienda, Magento guarda el producto en esa tienda. En 2.4 normalmente solo escribe lo que cambia, pero en algunas versiones puede marcar otros atributos (nombre, URL) como propios de la tienda. **Pruébalo primero en staging con un producto** y revisa en el Admin que el nombre y la URL de la tienda sigan con «Use Default Value».
+
 ## 3. (Opcional) Login por usuario con Supabase
 
 Úsalo si varias personas van a usar el dashboard y quieres saber quién hizo cada lote.

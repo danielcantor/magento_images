@@ -26,6 +26,8 @@ import { useRoles } from "./useRoles";
 interface Props {
   sku: string;
   name?: string;
+  /** Igualar las tiendas a lo general después de cada cambio. */
+  syncStoresEnabled?: boolean;
   onClose: () => void;
   onChanged?: () => void;
 }
@@ -33,7 +35,7 @@ interface Props {
 const key = (e: MediaEntry, position: number) =>
   JSON.stringify([e.label ?? "", e.disabled, [...e.types].sort(), position]);
 
-export default function MediaEditor({ sku, name, onClose, onChanged }: Props) {
+export default function MediaEditor({ sku, name, syncStoresEnabled = false, onClose, onChanged }: Props) {
   const [original, setOriginal] = useState<MediaEntry[]>([]);
   const [items, setItems] = useState<MediaEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -41,6 +43,35 @@ export default function MediaEditor({ sku, name, onClose, onChanged }: Props) {
   const [error, setError] = useState<string | null>(null);
   const addInput = useRef<HTMLInputElement>(null);
   const { roles, firstImageRoles } = useRoles();
+  type StoreDiffs = Awaited<ReturnType<typeof api.storeDiffs>>;
+  const [storeDiffs, setStoreDiffs] = useState<StoreDiffs | null>(null);
+  const [storeNote, setStoreNote] = useState<string | null>(null);
+
+  const checkStores = useCallback(async () => {
+    if (!syncStoresEnabled) return;
+    try {
+      setStoreDiffs(await api.storeDiffs(sku));
+    } catch (e) {
+      setStoreNote(`No se pudieron revisar las tiendas: ${(e as Error).message}`);
+    }
+  }, [sku, syncStoresEnabled]);
+
+  /** Iguala las tiendas y actualiza el aviso. */
+  const syncStoresNow = useCallback(async () => {
+    const r = await api.syncStores(sku);
+    setStoreNote(
+      r.stillDifferent.length
+        ? `Siguen distintas: ${r.stillDifferent.join(", ")}`
+        : r.storesSynced.length
+          ? `Tiendas igualadas a lo general: ${r.storesSynced.join(", ")}.`
+          : null,
+    );
+    setStoreDiffs([]);
+  }, [sku]);
+
+  useEffect(() => {
+    void checkStores();
+  }, [checkStores]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -112,6 +143,14 @@ export default function MediaEditor({ sku, name, onClose, onChanged }: Props) {
     setError(null);
     try {
       await fn();
+      if (syncStoresEnabled) {
+        setBusy("Igualando tiendas…");
+        try {
+          await syncStoresNow();
+        } catch (e) {
+          setStoreNote(`El cambio se guardó, pero no se pudieron igualar las tiendas: ${(e as Error).message}`);
+        }
+      }
       await load();
       onChanged?.();
     } catch (e) {
@@ -166,6 +205,24 @@ export default function MediaEditor({ sku, name, onClose, onChanged }: Props) {
         </header>
         <div className="body stack">
           {error && <div className="alert">{error}</div>}
+          {storeDiffs && storeDiffs.length > 0 && (
+            <div className="alert warn-box">
+              <div>
+                <b>Algunas tiendas tienen valores propios de imágenes</b> y no muestran lo general:
+                <ul className="small" style={{ margin: "6px 0" }}>
+                  {storeDiffs.map((d) => (
+                    <li key={d.storeCode}>
+                      {d.storeName}: {[...new Set(d.diffs.flatMap((x) => x.fields))].join(", ")} ({d.diffs.length} imagen(es))
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <button className="primary" disabled={!!busy || dirty} title={dirty ? "Guarda o descarta los cambios primero" : undefined} onClick={() => void run("Igualando tiendas…", async () => {})}>
+                Igualar todas las tiendas a lo general
+              </button>
+            </div>
+          )}
+          {storeNote && <div className="alert info small">{storeNote}</div>}
           {loading ? (
             <p className="muted">Cargando imágenes…</p>
           ) : items.length === 0 ? (

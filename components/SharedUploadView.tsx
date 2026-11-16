@@ -4,6 +4,7 @@ import { useDropzone } from "react-dropzone";
 import { api } from "@/lib/api";
 import { runSharedUpload, type QueueSettings, type UploadMode } from "@/lib/bulk";
 import QueueNotice from "./QueueNotice";
+import SyncStoresOption from "./SyncStoresOption";
 import { parseSkuCsv, parseSkuText, SHARED_SKUS_KEY } from "@/lib/skuList";
 import { useRoles } from "./useRoles";
 import JobProgress from "./JobProgress";
@@ -21,7 +22,7 @@ interface Img {
 
 let nextKey = 1;
 
-export default function SharedUploadView({ uploadMode = "direct", queue }: { uploadMode?: UploadMode; queue?: QueueSettings }) {
+export default function SharedUploadView({ uploadMode = "direct", queue, syncStoresEnabled = false }: { uploadMode?: UploadMode; queue?: QueueSettings; syncStoresEnabled?: boolean }) {
   const [skuText, setSkuText] = useState("");
   const [existing, setExisting] = useState<string[]>([]);
   const [checked, setChecked] = useState<Set<string>>(new Set());
@@ -30,6 +31,7 @@ export default function SharedUploadView({ uploadMode = "direct", queue }: { upl
   const [images, setImages] = useState<Img[]>([]);
   const csvInput = useRef<HTMLInputElement>(null);
   const job = useJob();
+  const [syncStores, setSyncStores] = useState(true);
   const { roles, labelOf } = useRoles();
 
   // SKU enviados desde la tabla de Productos.
@@ -129,7 +131,7 @@ export default function SharedUploadView({ uploadMode = "direct", queue }: { upl
     const desc = images.map((i) => `posición ${i.position}${i.types.length ? ` (${i.types.map(labelOf).join(", ")})` : ""}`).join("; ");
     if (!confirm(`Se anexarán ${images.length} imagen(es) a ${valid.length} producto(s): ${desc}. Las imágenes existentes desde esa posición bajarán un puesto. ¿Continuar?`)) return;
     await job.start("anexar-varios", (cb) =>
-      runSharedUpload(valid, images.map(({ file, position, types }) => ({ file, position, types })), cb, { uploadMode, queue }),
+      runSharedUpload(valid, images.map(({ file, position, types }) => ({ file, position, types })), cb, { uploadMode, queue, syncStores: syncStoresEnabled && syncStores }),
     );
   }
 
@@ -269,6 +271,7 @@ export default function SharedUploadView({ uploadMode = "direct", queue }: { upl
       {error && <div className="alert">{error}</div>}
 
       <div className="row">
+        {syncStoresEnabled && <SyncStoresOption checked={syncStores} onChange={setSyncStores} disabled={job.running} />}
         <span className="spacer" />
         <button className="primary" onClick={start} disabled={!canRun}>
           Anexar {images.length || ""} {images.length === 1 ? "imagen" : "imágenes"} a {valid.length} producto{valid.length === 1 ? "" : "s"}

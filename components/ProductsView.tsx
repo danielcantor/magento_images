@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { SHARED_SKUS_KEY } from "@/lib/skuList";
 import { api } from "@/lib/api";
-import { runBulkDelete } from "@/lib/bulk";
+import { runBulkDelete, runStoreSync } from "@/lib/bulk";
 import { PAGE_SIZES, type ProductRow, type Website } from "@/lib/types";
 import MediaEditor from "./MediaEditor";
 import JobProgress from "./JobProgress";
@@ -37,7 +37,7 @@ function readInitialFilters(): Filters {
   return f;
 }
 
-export default function ProductsView() {
+export default function ProductsView({ syncStoresEnabled = false }: { syncStoresEnabled?: boolean }) {
   const [q, setQ] = useState("");
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
@@ -149,8 +149,16 @@ export default function ProductsView() {
     const what = onlyWithoutRoles ? "las imágenes SIN rol (ni base, ni small, ni thumbnail)" : "TODAS las imágenes";
     if (!confirm(`Vas a borrar ${what} de ${skus.length} producto(s). Esta acción no se puede deshacer. ¿Continuar?`)) return;
     await job.start(onlyWithoutRoles ? "borrar-sin-rol" : "borrar-todas", (cb) =>
-      runBulkDelete(skus, { onlyWithoutRoles }, cb),
+      runBulkDelete(skus, { onlyWithoutRoles, syncStores: syncStoresEnabled }, cb),
     );
+    setSelected(new Set());
+    void load();
+  }
+
+  async function bulkSyncStores() {
+    const skus = [...selected];
+    if (!confirm(`Se copiarán los roles, alt, posición y «ocultar» generales en todas las tiendas de ${skus.length} producto(s). ¿Continuar?`)) return;
+    await job.start("igualar-tiendas", (cb) => runStoreSync(skus, cb));
     setSelected(new Set());
     void load();
   }
@@ -208,7 +216,7 @@ export default function ProductsView() {
       </div>
 
       <JobProgress
-        title="Borrado masivo"
+        title="Acción masiva"
         progress={job.progress}
         lines={job.lines}
         running={job.running}
@@ -320,6 +328,11 @@ export default function ProductsView() {
           <button onClick={attachToSelected} disabled={job.running}>
             Anexar imagen…
           </button>
+          {syncStoresEnabled && (
+            <button onClick={bulkSyncStores} disabled={job.running} title="Copia los valores generales de las imágenes en cada store view">
+              Igualar tiendas
+            </button>
+          )}
           <button onClick={() => bulkDelete(true)} disabled={job.running}>
             Borrar imágenes sin rol
           </button>
@@ -330,7 +343,13 @@ export default function ProductsView() {
       )}
 
       {editing && (
-        <MediaEditor sku={editing.sku} name={editing.name} onClose={() => setEditing(null)} onChanged={() => void load()} />
+        <MediaEditor
+          sku={editing.sku}
+          name={editing.name}
+          syncStoresEnabled={syncStoresEnabled}
+          onClose={() => setEditing(null)}
+          onChanged={() => void load()}
+        />
       )}
     </div>
   );

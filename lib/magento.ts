@@ -3,7 +3,7 @@
 import "server-only";
 import { getAuthMode } from "./authMode";
 import { getRequestToken } from "./requestToken";
-import type { MediaEntry, ProductRow, ProductSearchResult } from "./types";
+import { FALLBACK_ROLES, type MediaEntry, type MediaRole, type ProductRow, type ProductSearchResult, type Website } from "./types";
 
 export class MagentoError extends Error {
   constructor(message: string, public status: number) {
@@ -170,43 +170,140 @@ export function withUrls(entries: MediaEntry[] | null | undefined): MediaEntry[]
     .sort((a, b) => a.position - b.position);
 }
 
-export async function searchProducts(opts: {
+export interface ProductFilters {
   q?: string;
   page?: number;
   pageSize?: number;
-}): Promise<ProductSearchResult> {
+  /** 1 = activo, 2 = inactivo. */
+  status?: 1 | 2;
+  websiteId?: number;
+  storeId?: number;
+}
+
+export function buildProductSearch(opts: ProductFilters): URLSearchParams {
   const page = Math.max(1, opts.page ?? 1);
-  const pageSize = Math.min(100, Math.max(1, opts.pageSize ?? 25));
+  const pageSize = Math.min(200, Math.max(1, opts.pageSize ?? 25));
   const p = new URLSearchParams();
   p.set("searchCriteria[currentPage]", String(page));
   p.set("searchCriteria[pageSize]", String(pageSize));
   p.set("searchCriteria[sortOrders][0][field]", "entity_id");
   p.set("searchCriteria[sortOrders][0][direction]", "DESC");
+
+  // Cada filterGroup se combina con AND; los filtros dentro de un grupo, con OR.
+  let group = 0;
+  const add = (filters: [field: string, value: string, condition: string][]) => {
+    filters.forEach(([field, value, cond], i) => {
+      const k = `searchCriteria[filterGroups][${group}][filters][${i}]`;
+      p.set(`${k}[field]`, field);
+      p.set(`${k}[value]`, value);
+      p.set(`${k}[conditionType]`, cond);
+    });
+    group++;
+  };
   const q = opts.q?.trim();
-  if (q) {
-    // Dos filtros en el mismo grupo = OR (SKU o nombre).
-    p.set("searchCriteria[filterGroups][0][filters][0][field]", "sku");
-    p.set("searchCriteria[filterGroups][0][filters][0][value]", `%${q}%`);
-    p.set("searchCriteria[filterGroups][0][filters][0][conditionType]", "like");
-    p.set("searchCriteria[filterGroups][0][filters][1][field]", "name");
-    p.set("searchCriteria[filterGroups][0][filters][1][value]", `%${q}%`);
-    p.set("searchCriteria[filterGroups][0][filters][1][conditionType]", "like");
-  }
+  if (q) add([["sku", `%${q}%`, "like"], ["name", `%${q}%`, "like"]]);
+  if (opts.status === 1 || opts.status === 2) add([["status", String(opts.status), "eq"]]);
+  if (opts.websiteId) add([["website_id", String(opts.websiteId), "eq"]]);
+  if (opts.storeId) add([["store_id", String(opts.storeId), "eq"]]);
+
   p.set(
     "fields",
-    "items[id,sku,name,type_id,status,media_gallery_entries],total_count",
+    "items[id,sku,name,type_id,status,media_gallery_entries,extension_attributes[website_ids]],total_count",
   );
+  return p;
+}
+
+export async function searchProducts(opts: ProductFilters): Promise<ProductSearchResult> {
   const data = await magentoFetch<{
-    items: (Omit<ProductRow, "media"> & { media_gallery_entries?: MediaEntry[] })[] | null;
+    items:
+      | (Omit<ProductRow, "media" | "websiteIds"> & {
+          media_gallery_entries?: MediaEntry[];
+          extension_attributes?: { website_ids?: number[] };
+        })[]
+      | null;
     total_count: number;
-  }>(`/products?${p.toString()}`);
+  }>(`/products?${buildProductSearch(opts).toString()}`);
   return {
     total: data.total_count ?? 0,
-    items: (data.items ?? []).map(({ media_gallery_entries, ...rest }) => ({
+    items: (data.items ?? []).map(({ media_gallery_entries, extension_attributes, ...rest }) => ({
       ...rest,
       media: withUrls(media_gallery_entries),
+      websiteIds: extension_attributes?.website_ids ?? [],
     })),
   };
+}
+
+// ---------------------------------------------------------------------------
+// Roles de imagen y tiendas (con caché en memoria del servidor).
+
+const CACHE_MS = 10 * 60 * 1000;
+const cache = new Map<string, { at: number; value: unknown }>();
+
+async function cached<T>(key: string, load: () => Promise<T>): Promise<T> {
+  const hit = cache.get(key);
+  if (hit && Date.now() - hit.at < CACHE_MS) return hit.value as T;
+  const value = await load();
+  cache.set(key, { at: Date.now(), value });
+  return value;
+}
+
+/** Solo para tests. */
+export function clearMagentoCache() {
+  cache.clear();
+}
+
+const STANDARD_ORDER = ["image", "small_image", "thumbnail", "swatch_image"];
+
+/** Roles de imagen de la tienda (atributos media_image). Si falla, los 4 estándar. */
+export async function getMediaRoles(): Promise<MediaRole[]> {
+  try {
+    return await cached(`roles:${getConfig().baseUrl}`, async () => {
+      const p = new URLSearchParams();
+      p.set("searchCriteria[filterGroups][0][filters][0][field]", "frontend_input");
+      p.set("searchCriteria[filterGroups][0][filters][0][value]", "media_image");
+      p.set("searchCriteria[filterGroups][0][filters][0][conditionType]", "eq");
+      p.set("searchCriteria[pageSize]", "100");
+      p.set("fields", "items[attribute_code,default_frontend_label,frontend_labels]");
+      const data = await magentoFetch<{ items: { attribute_code: string; default_frontend_label?: string | null }[] | null }>(
+        `/products/attributes?${p}`,
+      );
+      const roles = (data.items ?? [])
+        .filter((a) => a.attribute_code)
+        .map((a) => ({ code: a.attribute_code, label: a.default_frontend_label || a.attribute_code }));
+      if (!roles.length) throw new Error("sin roles");
+      const rank = (c: string) => (STANDARD_ORDER.includes(c) ? STANDARD_ORDER.indexOf(c) : 100);
+      return roles.sort((a, b) => rank(a.code) - rank(b.code));
+    });
+  } catch (err) {
+    if (err instanceof MagentoError && err.status === 401) throw err;
+    return FALLBACK_ROLES;
+  }
+}
+
+/** Roles que recibe la primera imagen en la subida masiva: todos menos Hover (o FIRST_IMAGE_ROLES). */
+export function pickFirstImageRoles(roles: MediaRole[], override = process.env.FIRST_IMAGE_ROLES): string[] {
+  const codes = roles.map((r) => r.code);
+  if (override?.trim()) {
+    return override.split(",").map((c) => c.trim()).filter((c) => codes.includes(c));
+  }
+  return roles.filter((r) => !/hover/i.test(r.code) && !/hover/i.test(r.label)).map((r) => r.code);
+}
+
+export async function getWebsites(): Promise<Website[]> {
+  return cached(`stores:${getConfig().baseUrl}`, async () => {
+    const [websites, views] = await Promise.all([
+      magentoFetch<{ id: number; code: string; name: string }[]>("/store/websites"),
+      magentoFetch<{ id: number; code: string; name: string; website_id: number; is_active?: number }[]>("/store/storeViews"),
+    ]);
+    return websites
+      .filter((w) => w.id !== 0) // "admin"
+      .map((w) => ({
+        id: w.id,
+        code: w.code,
+        name: w.name,
+        stores: views.filter((v) => v.website_id === w.id && v.id !== 0).map((v) => ({ id: v.id, code: v.code, name: v.name })),
+      }));
+  });
 }
 
 /** Devuelve los SKU que existen, con la grafía exacta que tiene Magento. */

@@ -1,8 +1,7 @@
 import { BadRequest, handle } from "@/lib/apiHandler";
 import { enqueueMediaBulk, type BulkMediaItem } from "@/lib/magento";
 import { safeFileName } from "@/lib/skuMatcher";
-import { ROLES } from "@/lib/types";
-import { fileToContent, parseTypes, type FileContent } from "@/lib/uploadValidation";
+import { allowedRoleCodes, fileToContent, parseTypes, type FileContent } from "@/lib/uploadValidation";
 
 export const maxDuration = 60;
 
@@ -44,6 +43,7 @@ export const POST = handle(async (req: Request) => {
     if (!contents.has(it.field)) contents.set(it.field, await fileToContent(form.get(it.field)));
   }
 
+  const roles = await allowedRoleCodes();
   const toEntry = (it: IncomingItem): BulkMediaItem => {
     const c = contents.get(it.field)!;
     const position = Math.max(0, Math.floor(Number(it.position) || 0));
@@ -54,7 +54,7 @@ export const POST = handle(async (req: Request) => {
         label: "",
         position,
         disabled: false,
-        types: parseTypes(it.types, ROLES),
+        types: parseTypes(it.types, roles),
         content: { base64_encoded_data: c.base64, type: c.mimeType, name: safeFileName(it.sku.trim(), position || 1, c.ext) },
       },
     };

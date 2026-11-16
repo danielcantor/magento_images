@@ -20,7 +20,8 @@ import { CSS } from "@dnd-kit/utilities";
 import { api } from "@/lib/api";
 import { replaceImage } from "@/lib/bulk";
 import { prepareImage } from "@/lib/imagePrep";
-import { ROLES, ROLE_LABELS, type MediaEntry } from "@/lib/types";
+import type { MediaEntry, MediaRole } from "@/lib/types";
+import { useRoles } from "./useRoles";
 
 interface Props {
   sku: string;
@@ -39,6 +40,7 @@ export default function MediaEditor({ sku, name, onClose, onChanged }: Props) {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const addInput = useRef<HTMLInputElement>(null);
+  const { roles, firstImageRoles } = useRoles();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -142,7 +144,7 @@ export default function MediaEditor({ sku, name, onClose, onChanged }: Props) {
       let pos = items.reduce((m, e) => Math.max(m, e.position), 0);
       for (const f of Array.from(files)) {
         const prepared = await prepareImage(f);
-        await api.uploadMedia(sku, prepared, { position: ++pos, types: items.length === 0 && pos === 1 ? ["image", "small_image", "thumbnail"] : [] });
+        await api.uploadMedia(sku, prepared, { position: ++pos, types: items.length === 0 && pos === 1 ? firstImageRoles : [] });
       }
     });
 
@@ -181,6 +183,7 @@ export default function MediaEditor({ sku, name, onClose, onChanged }: Props) {
                         key={e.id}
                         entry={e}
                         index={i}
+                        roles={roles}
                         dirty={dirtyIds.has(e.id)}
                         disabled={!!busy}
                         lockedReason={lockedReason}
@@ -229,6 +232,7 @@ export default function MediaEditor({ sku, name, onClose, onChanged }: Props) {
 function MediaCard(props: {
   entry: MediaEntry;
   index: number;
+  roles: MediaRole[];
   dirty: boolean;
   disabled: boolean;
   lockedReason?: string;
@@ -255,16 +259,17 @@ function MediaCard(props: {
       </div>
       <div className="media-body">
         <div className="roles">
-          {ROLES.map((r) => (
+          {props.roles.map(({ code, label }) => (
             <button
-              key={r}
+              key={code}
               type="button"
-              className={`role${e.types.includes(r) ? " on" : ""}`}
-              onClick={() => props.onRole(r)}
+              className={`role${e.types.includes(code) ? " on" : ""}`}
+              onClick={() => props.onRole(code)}
               disabled={disabled}
-              aria-pressed={e.types.includes(r)}
+              aria-pressed={e.types.includes(code)}
+              title={code}
             >
-              {ROLE_LABELS[r]}
+              {label}
             </button>
           ))}
         </div>

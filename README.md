@@ -4,12 +4,12 @@ Web para **subir, ordenar, editar y borrar imágenes de productos de Magento 2 d
 
 ## Qué hace
 
-- **Productos**: busca por SKU o nombre, muestra miniatura y número de imágenes, y avisa de productos sin imagen base.
-- **Editor por producto**: arrastra para reordenar, asigna roles (Base, Small, Thumbnail, Swatch), edita el texto alternativo, oculta, reemplaza (conserva rol y posición), borra y añade imágenes.
+- **Productos**: busca por SKU o nombre y filtra por estado (activo/inactivo) y por sitio web o store view. Eliges cuántos ver por página (25, 50, 100 o 200) y la URL guarda los filtros. La tabla muestra miniatura, estado, sitios, número de imágenes y un aviso si falta la imagen base. Haz clic en una fila para abrir sus imágenes.
+- **Editor por producto**: arrastra para reordenar, asigna roles (los de tu tienda: se leen de Magento, incluidos los de módulos como Hover o Abandoned Cart Image), edita el texto alternativo, oculta, reemplaza (conserva rol y posición), borra y añade imágenes.
 - **Subida masiva por SKU**: arrastra cientos de archivos con nombres `SKU.jpg`, `SKU_2.jpg`, `SKU_3.jpg`…
   - Vista previa que comprueba en Magento que cada SKU existe antes de subir.
   - Modo **añadir** (no toca lo que hay) o **reemplazar galería** (borra las actuales).
-  - La imagen 1 puede quedar como base/small/thumbnail. En modo añadir, la base existente solo se cambia si subes la posición 1.
+  - La imagen 1 puede recibir todos los roles de la tienda menos los de tipo Hover. Para elegir otros, define `FIRST_IMAGE_ROLES` (códigos separados por comas, p. ej. `image,small_image,thumbnail`). En modo añadir, la base existente solo se cambia si subes la posición 1.
   - Redimensiona a 2500 px y comprime en el navegador; convierte WebP a JPG.
   - Progreso en vivo, botón de detener y CSV con el resultado.
 - **Imagen a varios SKU**: sube la misma imagen (o varias) a una lista de productos, cada una en la posición que elijas.

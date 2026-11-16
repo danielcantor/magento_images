@@ -1,8 +1,7 @@
 import { BadRequest, handle } from "@/lib/apiHandler";
 import { addMedia } from "@/lib/magento";
 import { safeFileName } from "@/lib/skuMatcher";
-import { ROLES } from "@/lib/types";
-import { fileToContent, parseTypes } from "@/lib/uploadValidation";
+import { allowedRoleCodes, fileToContent, parseTypes } from "@/lib/uploadValidation";
 
 export const maxDuration = 60;
 
@@ -14,12 +13,13 @@ export const POST = handle(async (req: Request) => {
   if (!sku) throw new BadRequest("Falta el SKU");
   const content = await fileToContent(form.get("file"));
 
-  let types: string[];
+  let rawTypes: unknown;
   try {
-    types = parseTypes(JSON.parse(String(form.get("types") ?? "[]")), ROLES);
+    rawTypes = JSON.parse(String(form.get("types") ?? "[]"));
   } catch {
     throw new BadRequest("types debe ser un JSON array");
   }
+  const types = parseTypes(rawTypes, await allowedRoleCodes());
   const position = Number(form.get("position") ?? 0) || 0;
 
   const id = await addMedia(sku, {

@@ -1,5 +1,6 @@
 import "server-only";
 import { BadRequest } from "./apiHandler";
+import { getMediaRoles } from "./magento";
 
 // Tipos que acepta Magento por API. WebP se convierte a JPEG en el navegador.
 export const MIME_EXT: Record<string, string> = {
@@ -32,4 +33,9 @@ export async function fileToContent(file: unknown): Promise<FileContent> {
 
 export function parseTypes(raw: unknown, allowed: readonly string[]): string[] {
   return Array.isArray(raw) ? raw.map(String).filter((t) => allowed.includes(t)) : [];
+}
+
+/** Códigos de rol válidos según la tienda. */
+export async function allowedRoleCodes(): Promise<string[]> {
+  return (await getMediaRoles()).map((r) => r.code);
 }

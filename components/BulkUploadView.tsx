@@ -4,6 +4,7 @@ import { useDropzone } from "react-dropzone";
 import { api } from "@/lib/api";
 import { runBulkUpload, type QueueSettings, type UploadMode } from "@/lib/bulk";
 import QueueNotice from "./QueueNotice";
+import { useRoles } from "./useRoles";
 import { candidateSkus, matchFiles, parseFileName, type Separator } from "@/lib/skuMatcher";
 import JobProgress from "./JobProgress";
 import { useJob } from "./useJob";
@@ -20,6 +21,7 @@ export default function BulkUploadView({ uploadMode = "direct", queue }: { uploa
   const [validating, setValidating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const job = useJob();
+  const { firstImageRoles, labelOf } = useRoles();
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     multiple: true,
@@ -82,7 +84,7 @@ export default function BulkUploadView({ uploadMode = "direct", queue }: { uploa
     )
       return;
     await job.start(mode === "replace" ? "subida-reemplazar" : "subida-añadir", (cb) =>
-      runBulkUpload(match.groups, { mode, assignRoles, uploadMode, queue }, cb),
+      runBulkUpload(match.groups, { mode, assignRoles, firstImageRoles, uploadMode, queue }, cb),
     );
   }
 
@@ -119,7 +121,7 @@ export default function BulkUploadView({ uploadMode = "direct", queue }: { uploa
           </label>
           <label className="check">
             <input type="checkbox" checked={assignRoles} onChange={(e) => setAssignRoles(e.target.checked)} disabled={job.running} />
-            La primera imagen de cada SKU será base, small y thumbnail
+            La primera imagen de cada SKU recibirá los roles: {firstImageRoles.map(labelOf).join(", ")}
           </label>
           {mode === "append" && assignRoles && (
             <span className="muted small">

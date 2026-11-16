@@ -1,5 +1,5 @@
 // Llamadas desde el navegador a nuestra API (que a su vez habla con Magento).
-import type { MediaEntry, ProductSearchResult } from "./types";
+import type { MediaEntry, MediaRole, ProductSearchResult, Website } from "./types";
 
 export class ApiError extends Error {
   constructor(message: string, public status: number) {
@@ -26,8 +26,17 @@ const json = (method: string, data: unknown): RequestInit => ({
 const enc = encodeURIComponent;
 
 export const api = {
-  searchProducts: (q: string, page: number, pageSize = 25) =>
-    request<ProductSearchResult>(`/api/products?${new URLSearchParams({ q, page: String(page), pageSize: String(pageSize) })}`),
+  searchProducts: (f: { q: string; page: number; pageSize?: number; status?: string; website?: string; store?: string }) => {
+    const p = new URLSearchParams({ q: f.q, page: String(f.page), pageSize: String(f.pageSize ?? 25) });
+    if (f.status) p.set("status", f.status);
+    if (f.website) p.set("website", f.website);
+    if (f.store) p.set("store", f.store);
+    return request<ProductSearchResult>(`/api/products?${p}`);
+  },
+
+  roles: () => request<{ roles: MediaRole[]; firstImageRoles: string[] }>("/api/roles"),
+
+  websites: () => request<{ websites: Website[] }>("/api/stores").then((r) => r.websites),
 
   validateSkus: (skus: string[]) =>
     request<{ existing: string[] }>("/api/products/validate", json("POST", { skus })),

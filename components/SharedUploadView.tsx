@@ -5,7 +5,7 @@ import { api } from "@/lib/api";
 import { runSharedUpload, type QueueSettings, type UploadMode } from "@/lib/bulk";
 import QueueNotice from "./QueueNotice";
 import { parseSkuCsv, parseSkuText, SHARED_SKUS_KEY } from "@/lib/skuList";
-import { ROLES, ROLE_LABELS } from "@/lib/types";
+import { useRoles } from "./useRoles";
 import JobProgress from "./JobProgress";
 import { useJob } from "./useJob";
 
@@ -30,6 +30,7 @@ export default function SharedUploadView({ uploadMode = "direct", queue }: { upl
   const [images, setImages] = useState<Img[]>([]);
   const csvInput = useRef<HTMLInputElement>(null);
   const job = useJob();
+  const { roles, labelOf } = useRoles();
 
   // SKU enviados desde la tabla de Productos.
   useEffect(() => {
@@ -125,7 +126,7 @@ export default function SharedUploadView({ uploadMode = "direct", queue }: { upl
   const canRun = !job.running && !validating && allChecked && valid.length > 0 && images.length > 0;
 
   async function start() {
-    const desc = images.map((i) => `posición ${i.position}${i.types.length ? ` (${i.types.map((t) => ROLE_LABELS[t as keyof typeof ROLE_LABELS]).join(", ")})` : ""}`).join("; ");
+    const desc = images.map((i) => `posición ${i.position}${i.types.length ? ` (${i.types.map(labelOf).join(", ")})` : ""}`).join("; ");
     if (!confirm(`Se anexarán ${images.length} imagen(es) a ${valid.length} producto(s): ${desc}. Las imágenes existentes desde esa posición bajarán un puesto. ¿Continuar?`)) return;
     await job.start("anexar-varios", (cb) =>
       runSharedUpload(valid, images.map(({ file, position, types }) => ({ file, position, types })), cb, { uploadMode, queue }),
@@ -233,16 +234,17 @@ export default function SharedUploadView({ uploadMode = "direct", queue }: { upl
                     </td>
                     <td>
                       <div className="roles">
-                        {ROLES.map((r) => (
+                        {roles.map(({ code, label }) => (
                           <button
-                            key={r}
+                            key={code}
                             type="button"
-                            className={`role${img.types.includes(r) ? " on" : ""}`}
-                            onClick={() => toggleRole(img.key, r)}
+                            className={`role${img.types.includes(code) ? " on" : ""}`}
+                            onClick={() => toggleRole(img.key, code)}
                             disabled={job.running}
-                            aria-pressed={img.types.includes(r)}
+                            aria-pressed={img.types.includes(code)}
+                            title={code}
                           >
-                            {ROLE_LABELS[r]}
+                            {label}
                           </button>
                         ))}
                       </div>

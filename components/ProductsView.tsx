@@ -4,17 +4,45 @@ import { useRouter } from "next/navigation";
 import { SHARED_SKUS_KEY } from "@/lib/skuList";
 import { api } from "@/lib/api";
 import { runBulkDelete } from "@/lib/bulk";
-import type { ProductRow } from "@/lib/types";
+import { PAGE_SIZES, type ProductRow, type Website } from "@/lib/types";
 import MediaEditor from "./MediaEditor";
 import JobProgress from "./JobProgress";
 import { useJob } from "./useJob";
 
-const PAGE_SIZE = 25;
+const SIZE_KEY = "products-page-size";
+
+interface Filters {
+  status: "" | "1" | "2";
+  /** "" | "w:<websiteId>" | "s:<storeId>" */
+  place: string;
+  size: number;
+}
+
+function readInitialFilters(): Filters {
+  const f: Filters = { status: "", place: "", size: 25 };
+  try {
+    const saved = Number(localStorage.getItem(SIZE_KEY));
+    if ((PAGE_SIZES as readonly number[]).includes(saved)) f.size = saved;
+  } catch {
+    /* localStorage no disponible */
+  }
+  if (typeof window === "undefined") return f;
+  const sp = new URLSearchParams(window.location.search);
+  const st = sp.get("status");
+  if (st === "1" || st === "2") f.status = st;
+  if (sp.get("website")) f.place = `w:${sp.get("website")}`;
+  if (sp.get("store")) f.place = `s:${sp.get("store")}`;
+  const size = Number(sp.get("size"));
+  if ((PAGE_SIZES as readonly number[]).includes(size)) f.size = size;
+  return f;
+}
 
 export default function ProductsView() {
   const [q, setQ] = useState("");
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
+  const [filters, setFilters] = useState<Filters | null>(null);
+  const [websites, setWebsites] = useState<Website[]>([]);
   const [rows, setRows] = useState<ProductRow[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -23,6 +51,31 @@ export default function ProductsView() {
   const [editing, setEditing] = useState<ProductRow | null>(null);
   const job = useJob();
   const router = useRouter();
+
+  // Filtros iniciales desde la URL (solo en el navegador) y lista de sitios.
+  useEffect(() => {
+    setFilters(readInitialFilters());
+    api.websites().then(setWebsites).catch(() => setWebsites([]));
+  }, []);
+
+  function updateFilters(change: Partial<Filters>) {
+    setFilters((f) => {
+      const next = { ...(f ?? readInitialFilters()), ...change };
+      try {
+        localStorage.setItem(SIZE_KEY, String(next.size));
+      } catch {
+        /* sin localStorage */
+      }
+      const sp = new URLSearchParams();
+      if (next.status) sp.set("status", next.status);
+      if (next.place.startsWith("w:")) sp.set("website", next.place.slice(2));
+      if (next.place.startsWith("s:")) sp.set("store", next.place.slice(2));
+      if (next.size !== 25) sp.set("size", String(next.size));
+      window.history.replaceState(null, "", sp.size ? `?${sp}` : window.location.pathname);
+      return next;
+    });
+    setPage(1);
+  }
 
   function attachToSelected() {
     try {
@@ -34,10 +87,18 @@ export default function ProductsView() {
   }
 
   const load = useCallback(async () => {
+    if (!filters) return;
     setLoading(true);
     setError(null);
     try {
-      const r = await api.searchProducts(query, page, PAGE_SIZE);
+      const r = await api.searchProducts({
+        q: query,
+        page,
+        pageSize: filters.size,
+        status: filters.status,
+        website: filters.place.startsWith("w:") ? filters.place.slice(2) : undefined,
+        store: filters.place.startsWith("s:") ? filters.place.slice(2) : undefined,
+      });
       setRows(r.items);
       setTotal(r.total);
     } catch (e) {
@@ -45,7 +106,7 @@ export default function ProductsView() {
     } finally {
       setLoading(false);
     }
-  }, [query, page]);
+  }, [query, page, filters]);
 
   useEffect(() => {
     void load();
@@ -54,13 +115,18 @@ export default function ProductsView() {
   // Búsqueda con pequeña espera mientras se escribe.
   useEffect(() => {
     const t = setTimeout(() => {
-      setPage(1);
-      setQuery(q.trim());
+      const v = q.trim();
+      if (v !== query) {
+        setQuery(v);
+        setPage(1);
+      }
     }, 350);
     return () => clearTimeout(t);
-  }, [q]);
+  }, [q, query]);
 
-  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const pageSize = filters?.size ?? 25;
+  const pages = Math.max(1, Math.ceil(total / pageSize));
+  const websiteName = (id: number) => websites.find((w) => w.id === id)?.name ?? `#${id}`;
   const allOnPage = rows.length > 0 && rows.every((r) => selected.has(r.sku));
 
   const toggle = (sku: string) =>
@@ -91,17 +157,54 @@ export default function ProductsView() {
 
   return (
     <div className="stack">
-      <div className="row">
-        <h1 style={{ margin: 0 }}>Productos</h1>
-        <span className="spacer" />
+      <h1 style={{ margin: 0 }}>Productos</h1>
+      <div className="row filters">
         <input
           type="search"
           placeholder="Buscar por SKU o nombre…"
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          style={{ width: "min(320px, 100%)" }}
           aria-label="Buscar productos"
+          className="grow"
         />
+        <label>
+          Estado{" "}
+          <select
+            value={filters?.status ?? ""}
+            onChange={(e) => updateFilters({ status: e.target.value as Filters["status"] })}
+            aria-label="Filtrar por estado"
+          >
+            <option value="">Todos</option>
+            <option value="1">Activos</option>
+            <option value="2">Inactivos</option>
+          </select>
+        </label>
+        <label>
+          Sitio / tienda{" "}
+          <select value={filters?.place ?? ""} onChange={(e) => updateFilters({ place: e.target.value })} aria-label="Filtrar por sitio o tienda">
+            <option value="">Todos</option>
+            {websites.map((w) => (
+              <optgroup key={w.id} label={w.name}>
+                <option value={`w:${w.id}`}>Todo «{w.name}»</option>
+                {w.stores.map((st) => (
+                  <option key={st.id} value={`s:${st.id}`}>
+                    {st.name}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
+        </label>
+        <label>
+          Por página{" "}
+          <select value={pageSize} onChange={(e) => updateFilters({ size: Number(e.target.value) })} aria-label="Productos por página">
+            {PAGE_SIZES.map((n) => (
+              <option key={n} value={n}>
+                {n}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
 
       <JobProgress
@@ -127,21 +230,22 @@ export default function ProductsView() {
                 <th style={{ width: 64 }}>Imagen</th>
                 <th>SKU</th>
                 <th>Nombre</th>
+                <th>Estado</th>
+                <th>Sitios</th>
                 <th>Imágenes</th>
-                <th style={{ width: 90 }}></th>
               </tr>
             </thead>
             <tbody>
               {loading && rows.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="muted">
+                  <td colSpan={7} className="muted">
                     Cargando…
                   </td>
                 </tr>
               )}
               {!loading && rows.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="muted">
+                  <td colSpan={7} className="muted">
                     No hay productos{query ? ` que coincidan con “${query}”` : ""}.
                   </td>
                 </tr>
@@ -150,8 +254,18 @@ export default function ProductsView() {
                 const base = r.media.find((m) => m.types.includes("image")) ?? r.media[0];
                 const noBase = r.media.length > 0 && !r.media.some((m) => m.types.includes("image"));
                 return (
-                  <tr key={r.sku} style={{ opacity: loading ? 0.6 : 1 }}>
-                    <td>
+                  <tr
+                    key={r.sku}
+                    className="clickable"
+                    style={{ opacity: loading ? 0.6 : 1 }}
+                    onClick={() => setEditing(r)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && e.target === e.currentTarget) setEditing(r);
+                    }}
+                    tabIndex={0}
+                    title="Abrir imágenes"
+                  >
+                    <td onClick={(e) => e.stopPropagation()}>
                       <input type="checkbox" checked={selected.has(r.sku)} onChange={() => toggle(r.sku)} aria-label={`Seleccionar ${r.sku}`} />
                     </td>
                     <td>
@@ -167,11 +281,12 @@ export default function ProductsView() {
                     </td>
                     <td>{r.name}</td>
                     <td>
+                      {r.status === 1 ? <span className="badge ok">Activo</span> : <span className="badge">Inactivo</span>}
+                    </td>
+                    <td className="small">{r.websiteIds.length ? r.websiteIds.map(websiteName).join(", ") : <span className="muted">—</span>}</td>
+                    <td>
                       <span className={`badge ${r.media.length ? "" : "warn"}`}>{r.media.length}</span>{" "}
                       {noBase && <span className="badge warn">sin base</span>}
-                    </td>
-                    <td>
-                      <button onClick={() => setEditing(r)}>Editar</button>
                     </td>
                   </tr>
                 );

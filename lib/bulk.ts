@@ -38,7 +38,8 @@ export interface JobCallbacks {
   concurrency?: number;
 }
 
-export const MAIN_ROLES = ["image", "small_image", "thumbnail"];
+/** Roles por defecto de la primera imagen si no llegan los de la tienda. */
+export const MAIN_ROLES = ["image", "small_image", "thumbnail", "swatch_image"];
 
 function tracker(total: number, cb: JobCallbacks) {
   const p: Progress = { done: 0, total, ok: 0, failed: 0 };
@@ -166,13 +167,21 @@ async function enqueueAndTrack(items: QueueItem[], step: Step, cb: JobCallbacks,
 
 export async function runBulkUpload(
   groups: SkuGroup<File>[],
-  opts: { mode: "append" | "replace"; assignRoles: boolean; uploadMode?: UploadMode; queue?: QueueSettings },
+  opts: {
+    mode: "append" | "replace";
+    assignRoles: boolean;
+    /** Roles que recibe la primera imagen de cada SKU (de /api/roles). */
+    firstImageRoles?: string[];
+    uploadMode?: UploadMode;
+    queue?: QueueSettings;
+  },
   cb: JobCallbacks,
 ): Promise<void> {
   const total = groups.reduce((n, g) => n + g.files.length, 0);
   const step = tracker(total, cb);
   const queued: QueueItem[] = [];
   const useQueue = opts.uploadMode === "bulk";
+  const firstRoles = opts.firstImageRoles?.length ? opts.firstImageRoles : MAIN_ROLES;
 
   await runPool(
     groups,
@@ -213,13 +222,13 @@ export async function runBulkUpload(
         try {
           const prepared = await prepareImage(f.file);
           if (useQueue) {
-            queued.push({ sku, fileName: f.fileName, file: prepared, position: offset + i + 1, types: giveRoles && i === 0 ? MAIN_ROLES : [] });
+            queued.push({ sku, fileName: f.fileName, file: prepared, position: offset + i + 1, types: giveRoles && i === 0 ? firstRoles : [] });
             continue;
           }
           await withRetry(() =>
             api.uploadMedia(sku, prepared, {
               position: offset + i + 1,
-              types: giveRoles && i === 0 ? MAIN_ROLES : [],
+              types: giveRoles && i === 0 ? firstRoles : [],
             }),
           );
           step({ sku, action: "subir", fileName: f.fileName, status: "ok" });

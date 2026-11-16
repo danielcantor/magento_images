@@ -22,12 +22,15 @@ import { replaceImage } from "@/lib/bulk";
 import { prepareImage } from "@/lib/imagePrep";
 import type { MediaEntry, MediaRole } from "@/lib/types";
 import { useRoles } from "./useRoles";
+import { SkeletonMediaCards } from "./Skeleton";
 
 interface Props {
   sku: string;
   name?: string;
   /** Igualar las tiendas a lo general después de cada cambio. */
   syncStoresEnabled?: boolean;
+  /** Cantidad de imágenes conocida (de la lista), para dibujar el skeleton. */
+  expectedCount?: number;
   onClose: () => void;
   onChanged?: () => void;
 }
@@ -35,10 +38,11 @@ interface Props {
 const key = (e: MediaEntry, position: number) =>
   JSON.stringify([e.label ?? "", e.disabled, [...e.types].sort(), position]);
 
-export default function MediaEditor({ sku, name, syncStoresEnabled = false, onClose, onChanged }: Props) {
+export default function MediaEditor({ sku, name, syncStoresEnabled = false, expectedCount = 3, onClose, onChanged }: Props) {
   const [original, setOriginal] = useState<MediaEntry[]>([]);
   const [items, setItems] = useState<MediaEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadedOnce, setLoadedOnce] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const addInput = useRef<HTMLInputElement>(null);
@@ -80,6 +84,7 @@ export default function MediaEditor({ sku, name, syncStoresEnabled = false, onCl
       const entries = await api.getMedia(sku);
       setOriginal(entries);
       setItems(entries);
+      setLoadedOnce(true);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -223,9 +228,12 @@ export default function MediaEditor({ sku, name, syncStoresEnabled = false, onCl
             </div>
           )}
           {storeNote && <div className="alert info small">{storeNote}</div>}
-          {loading ? (
-            <p className="muted">Cargando imágenes…</p>
-          ) : items.length === 0 ? (
+          {loading && !loadedOnce ? (
+            <div role="status" aria-label="Cargando imágenes">
+              <span className="skeleton sk-line" style={{ width: "min(560px, 80%)", marginBottom: 16 }} />
+              <SkeletonMediaCards count={Math.min(Math.max(expectedCount, 1), 8)} />
+            </div>
+          ) : items.length === 0 && !loading ? (
             <div className="alert info">Este producto no tiene imágenes.</div>
           ) : (
             <>
@@ -234,7 +242,7 @@ export default function MediaEditor({ sku, name, syncStoresEnabled = false, onCl
               </p>
               <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
                 <SortableContext items={items.map((e) => e.id)} strategy={rectSortingStrategy}>
-                  <div className="gallery">
+                  <div className={`gallery${loading ? " is-refreshing" : ""}`} aria-busy={loading}>
                     {items.map((e, i) => (
                       <MediaCard
                         key={e.id}
@@ -269,7 +277,7 @@ export default function MediaEditor({ sku, name, syncStoresEnabled = false, onCl
               e.target.value = "";
             }}
           />
-          <button onClick={() => addInput.current?.click()} disabled={!!busy || dirty} title={lockedReason}>
+          <button onClick={() => addInput.current?.click()} disabled={!!busy || dirty || loading} title={lockedReason}>
             + Añadir imágenes
           </button>
           <span className="spacer" />

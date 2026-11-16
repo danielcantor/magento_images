@@ -6,6 +6,7 @@ import { api } from "@/lib/api";
 import { runBulkDelete, runStoreSync } from "@/lib/bulk";
 import { PAGE_SIZES, type ProductRow, type Website } from "@/lib/types";
 import MediaEditor from "./MediaEditor";
+import { SkeletonRows } from "./Skeleton";
 import JobProgress from "./JobProgress";
 import { useJob } from "./useJob";
 
@@ -46,6 +47,8 @@ export default function ProductsView({ syncStoresEnabled = false }: { syncStores
   const [rows, setRows] = useState<ProductRow[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
+  /** Búsqueda/filtros/página de los datos que se muestran (para saber si es recarga de fondo). */
+  const [loadedKey, setLoadedKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [editing, setEditing] = useState<ProductRow | null>(null);
@@ -88,6 +91,7 @@ export default function ProductsView({ syncStoresEnabled = false }: { syncStores
 
   const load = useCallback(async () => {
     if (!filters) return;
+    const key = JSON.stringify([query, page, filters]);
     setLoading(true);
     setError(null);
     try {
@@ -101,6 +105,7 @@ export default function ProductsView({ syncStoresEnabled = false }: { syncStores
       });
       setRows(r.items);
       setTotal(r.total);
+      setLoadedKey(key);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -125,6 +130,9 @@ export default function ProductsView({ syncStoresEnabled = false }: { syncStores
   }, [q, query]);
 
   const pageSize = filters?.size ?? 25;
+  // Skeleton al entrar o al cambiar búsqueda/filtros/página; en recargas de fondo solo se atenúa.
+  const showSkeleton = !filters || (loading && loadedKey !== JSON.stringify([query, page, filters]));
+  const refreshing = loading && !showSkeleton;
   const pages = Math.max(1, Math.ceil(total / pageSize));
   const websiteName = (id: number) => websites.find((w) => w.id === id)?.name ?? `#${id}`;
   const allOnPage = rows.length > 0 && rows.every((r) => selected.has(r.sku));
@@ -243,14 +251,8 @@ export default function ProductsView({ syncStoresEnabled = false }: { syncStores
                 <th>Imágenes</th>
               </tr>
             </thead>
-            <tbody>
-              {loading && rows.length === 0 && (
-                <tr>
-                  <td colSpan={7} className="muted">
-                    Cargando…
-                  </td>
-                </tr>
-              )}
+            <tbody className={refreshing ? "is-refreshing" : undefined} aria-busy={loading}>
+              {showSkeleton && <SkeletonRows count={Math.min(pageSize, 10)} />}
               {!loading && rows.length === 0 && (
                 <tr>
                   <td colSpan={7} className="muted">
@@ -258,14 +260,13 @@ export default function ProductsView({ syncStoresEnabled = false }: { syncStores
                   </td>
                 </tr>
               )}
-              {rows.map((r) => {
+              {!showSkeleton && rows.map((r) => {
                 const base = r.media.find((m) => m.types.includes("image")) ?? r.media[0];
                 const noBase = r.media.length > 0 && !r.media.some((m) => m.types.includes("image"));
                 return (
                   <tr
                     key={r.sku}
                     className="clickable"
-                    style={{ opacity: loading ? 0.6 : 1 }}
                     onClick={() => setEditing(r)}
                     onKeyDown={(e) => {
                       if (e.key === "Enter" && e.target === e.currentTarget) setEditing(r);
@@ -346,6 +347,7 @@ export default function ProductsView({ syncStoresEnabled = false }: { syncStores
         <MediaEditor
           sku={editing.sku}
           name={editing.name}
+          expectedCount={editing.media.length}
           syncStoresEnabled={syncStoresEnabled}
           onClose={() => setEditing(null)}
           onChanged={() => void load()}

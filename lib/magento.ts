@@ -45,7 +45,7 @@ export function formatMagentoMessage(body: unknown): string | null {
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export const NO_PERMISSION_MESSAGE =
-  "Tu usuario de Magento no tiene permiso para esto (Catalog > Products) o la sesión caducó en Magento. Vuelve a entrar.";
+  "Tu usuario de Magento no tiene permiso para esto (Catalog > Products) o la sesión caducó en Magento. Volvé a entrar.";
 
 interface FetchOptions {
   /** false = petición sin token (login). Por defecto se usa el token de la petición. */
@@ -71,7 +71,7 @@ export async function magentoFetch<T>(
     const token = await getRequestToken();
     if (!token) {
       throw userMode
-        ? new MagentoError("Sesión caducada. Vuelve a entrar.", 401)
+        ? new MagentoError("Sesión caducada. Volvé a entrar.", 401)
         : new MagentoError("Falta MAGENTO_TOKEN en las variables de entorno.", 500);
     }
     headers.Authorization = `Bearer ${token}`;
@@ -115,7 +115,7 @@ export async function magentoFetch<T>(
       const msg =
         formatMagentoMessage(body) ??
         (res.status === 401
-          ? "Magento rechazó el token (401). Revisa el token y la opción de Bearer tokens."
+          ? "Magento rechazó el token (401). Revisá el token y la opción de Bearer tokens."
           : `Magento respondió ${res.status}`);
       throw new MagentoError(msg, res.status);
     }
@@ -147,17 +147,17 @@ export function translateLoginError(message: string, withOtp: boolean): string {
     return "Usuario o contraseña incorrectos (o la cuenta está bloqueada temporalmente por intentos fallidos).";
   }
   if (m.includes("not configured") || m.includes("not been configured") || m.includes("provider is not")) {
-    return "Este usuario aún no configuró Google Authenticator. Entra una vez en el Admin de Magento para activarlo.";
+    return "Este usuario aún no configuró Google Authenticator. Entrá una vez en el Admin de Magento para activarlo.";
   }
   if (withOtp && (m.includes("invalid code") || m.includes("code"))) {
-    return "El código de Google Authenticator no es válido. Usa el código actual de la app.";
+    return "El código de Google Authenticator no es válido. Usá el código actual de la app.";
   }
   if (m.includes("2fa") || m.includes("two-factor") || m.includes("tfa")) {
-    return "Tu Magento exige verificación en dos pasos: escribe el código de Google Authenticator.";
+    return "Tu Magento exige verificación en dos pasos: escribí el código de Google Authenticator.";
   }
   if (m.includes("does not match any route")) {
     return withOtp
-      ? "Tu Magento no tiene la verificación en dos pasos por API. Deja vacío el código."
+      ? "Tu Magento no tiene la verificación en dos pasos por API. Dejá vacío el código."
       : "Magento no acepta este método de login.";
   }
   return "Usuario o contraseña incorrectos.";

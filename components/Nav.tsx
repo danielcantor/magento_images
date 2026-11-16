@@ -21,9 +21,11 @@ export default function Nav({ mode, username }: { mode: AuthMode; username?: str
 
   return (
     <header className="topbar">
-      <div className="brand">
-        🖼️ <span>Imágenes Magento</span>
-      </div>
+      <Link href="/products" className="brand" aria-label="SommierCenter · Imágenes">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/brand/logo.svg" alt="SommierCenter" width={200} height={22} />
+        <span className="tag">Imágenes</span>
+      </Link>
       <nav className="nav">
         {links.map((l) => (
           <Link key={l.href} href={l.href} className={path.startsWith(l.href) ? "active" : ""}>
@@ -33,7 +35,7 @@ export default function Nav({ mode, username }: { mode: AuthMode; username?: str
       </nav>
       {username && (
         <span className="muted small user" title="Usuario de Magento conectado">
-          👤 {username}
+          {username}
         </span>
       )}
       {mode !== "none" && (

@@ -30,7 +30,7 @@ export async function POST(req: Request) {
     const password = String(body.password ?? "");
     const otp = String(body.otp ?? "").replace(/\s+/g, "");
     if (!username || !password) {
-      return NextResponse.json({ error: "Escribe usuario y contraseña" }, { status: 400 });
+      return NextResponse.json({ error: "Escribí usuario y contraseña" }, { status: 400 });
     }
     if (otp && !/^\d{6}$/.test(otp)) {
       return NextResponse.json({ error: "El código debe tener 6 dígitos" }, { status: 400 });

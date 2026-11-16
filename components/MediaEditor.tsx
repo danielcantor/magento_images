@@ -187,7 +187,7 @@ export default function MediaEditor({ sku, name, syncStoresEnabled = false, onCl
       }
     });
 
-  const lockedReason = dirty ? "Guarda o descarta los cambios primero" : undefined;
+  const lockedReason = dirty ? "Guardá o descartá los cambios primero" : undefined;
 
   return (
     <>
@@ -217,7 +217,7 @@ export default function MediaEditor({ sku, name, syncStoresEnabled = false, onCl
                   ))}
                 </ul>
               </div>
-              <button className="primary" disabled={!!busy || dirty} title={dirty ? "Guarda o descarta los cambios primero" : undefined} onClick={() => void run("Igualando tiendas…", async () => {})}>
+              <button className="primary" disabled={!!busy || dirty} title={dirty ? "Guardá o descartá los cambios primero" : undefined} onClick={() => void run("Igualando tiendas…", async () => {})}>
                 Igualar todas las tiendas a lo general
               </button>
             </div>
@@ -230,7 +230,7 @@ export default function MediaEditor({ sku, name, syncStoresEnabled = false, onCl
           ) : (
             <>
               <p className="muted small" style={{ margin: 0 }}>
-                Arrastra las imágenes para cambiar el orden. Pulsa un rol para asignarlo (cada rol solo puede estar en una imagen).
+                Arrastrá las imágenes para cambiar el orden. Tocá un rol para asignarlo (cada rol solo puede estar en una imagen).
               </p>
               <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
                 <SortableContext items={items.map((e) => e.id)} strategy={rectSortingStrategy}>

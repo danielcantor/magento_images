@@ -140,7 +140,7 @@ export default function SharedUploadView({ uploadMode = "direct", queue, syncSto
       <h1>Imagen a varios SKU</h1>
       {uploadMode === "bulk" && <QueueNotice />}
       <p className="muted" style={{ marginTop: -8 }}>
-        Sube una o varias imágenes a una lista de productos, cada una en la posición que elijas. Las imágenes que ya
+        Subí una o varias imágenes a una lista de productos, cada una en la posición que elijas. Las imágenes que ya
         estaban desde esa posición bajan un puesto; no se borra nada.
       </p>
 
@@ -169,7 +169,7 @@ export default function SharedUploadView({ uploadMode = "direct", queue, syncSto
         <textarea
           value={skuText}
           onChange={(e) => setSkuText(e.target.value)}
-          placeholder={"Pega aquí los SKU (uno por línea, o separados por comas o espacios)\nTEST-001\nTEST-002"}
+          placeholder={"Pegá acá los SKU (uno por línea, o separados por comas o espacios)\nTEST-001\nTEST-002"}
           rows={6}
           disabled={job.running}
           aria-label="Lista de SKU"
@@ -198,8 +198,8 @@ export default function SharedUploadView({ uploadMode = "direct", queue, syncSto
         <h2 style={{ margin: 0 }}>2. Imágenes y posición</h2>
         <div {...getRootProps({ className: `dropzone${isDragActive ? " active" : ""}` })} style={{ padding: 20 }}>
           <input {...getInputProps()} />
-          <b>Arrastra aquí la imagen o imágenes</b>
-          <div className="muted">o haz clic para elegirlas</div>
+          <b>Arrastrá acá la imagen o imágenes</b>
+          <div className="muted">o hacé clic para elegirlas</div>
         </div>
         {images.length > 0 && (
           <div className="table-wrap">
@@ -264,7 +264,7 @@ export default function SharedUploadView({ uploadMode = "direct", queue, syncSto
         )}
         <p className="muted small" style={{ margin: 0 }}>
           Posición 1 = primera imagen de la galería. Si el producto tiene menos imágenes, la nueva queda al final. Un rol
-          asignado aquí se le quita a la imagen que lo tuviera en cada producto.
+          asignado acá se le quita a la imagen que lo tuviera en cada producto.
         </p>
       </div>
 

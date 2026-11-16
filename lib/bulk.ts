@@ -173,7 +173,7 @@ async function enqueueAndTrack(items: QueueItem[], step: Step, cb: JobCallbacks,
       for (const t of pending) {
         t.items.forEach((it, i) => {
           if (t.done.has(i)) return;
-          step({ sku: it.sku, action: "subir", fileName: it.fileName, status: "error", bulk: t.uuid, message: "Magento aún no la procesó. Revisa que el cron y el consumidor async.operations.all estén activos; el estado está en System > Action Logs > Bulk Actions." });
+          step({ sku: it.sku, action: "subir", fileName: it.fileName, status: "error", bulk: t.uuid, message: "Magento aún no la procesó. Revisá que el cron y el consumidor async.operations.all estén activos; el estado está en System > Action Logs > Bulk Actions." });
         });
       }
       break;

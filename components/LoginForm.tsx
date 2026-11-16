@@ -14,8 +14,8 @@ export default function LoginForm({ mode, otpRequired = true }: { mode: AuthMode
   if (mode === "none") {
     return (
       <p className="muted">
-        No hay acceso configurado. Define <code>AUTH_MODE=magento</code>, <code>DASHBOARD_PASSWORD</code> (con{" "}
-        <code>SESSION_SECRET</code>) o las variables de Supabase. En local puedes entrar directamente:{" "}
+        No hay acceso configurado. Definí <code>AUTH_MODE=magento</code>, <code>DASHBOARD_PASSWORD</code> (con{" "}
+        <code>SESSION_SECRET</code>) o las variables de Supabase. En local podés entrar directamente:{" "}
         <a href="/products">ir al dashboard</a>.
       </p>
     );
@@ -50,7 +50,7 @@ export default function LoginForm({ mode, otpRequired = true }: { mode: AuthMode
       {mode === "magento" && (
         <>
           <p className="muted small" style={{ margin: 0 }}>
-            Entra con tu usuario del Admin de Magento.
+            Entrá con tu usuario del Admin de Magento.
           </p>
           <input
             type="text"

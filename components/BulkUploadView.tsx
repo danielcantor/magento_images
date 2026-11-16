@@ -102,7 +102,7 @@ export default function BulkUploadView({ uploadMode = "direct", queue, syncStore
 
       <div className="card stack">
         <p style={{ margin: 0 }}>
-          Nombra cada archivo con el SKU del producto: <code>SKU.jpg</code> es la imagen 1, <code>SKU{separator}2.jpg</code> la 2, etc.
+          Nombrá cada archivo con el SKU del producto: <code>SKU.jpg</code> es la imagen 1, <code>SKU{separator}2.jpg</code> la 2, etc.
           Formatos: JPG, PNG, GIF y WebP (WebP se convierte a JPG). Las imágenes grandes se redimensionan a 2500 px.
         </p>
         <div className="row">
@@ -128,7 +128,7 @@ export default function BulkUploadView({ uploadMode = "direct", queue, syncStore
           {syncStoresEnabled && <SyncStoresOption checked={syncStores} onChange={setSyncStores} disabled={job.running} />}
           {mode === "append" && assignRoles && (
             <span className="muted small">
-              Si el producto ya tiene imagen base, solo se cambia cuando subes la posición 1 (<code>SKU.jpg</code> o <code>SKU{separator}1.jpg</code>).
+              Si el producto ya tiene imagen base, solo se cambia cuando subís la posición 1 (<code>SKU.jpg</code> o <code>SKU{separator}1.jpg</code>).
             </span>
           )}
         </div>
@@ -136,8 +136,8 @@ export default function BulkUploadView({ uploadMode = "direct", queue, syncStore
 
       <div {...getRootProps({ className: `dropzone${isDragActive ? " active" : ""}` })}>
         <input {...getInputProps()} />
-        <b>Arrastra aquí las imágenes</b>
-        <div className="muted">o haz clic para elegirlas (puedes seleccionar cientos a la vez)</div>
+        <b>Arrastrá acá las imágenes</b>
+        <div className="muted">o hacé clic para elegirlas (podés seleccionar cientos a la vez)</div>
       </div>
 
       {error && <div className="alert">{error}</div>}

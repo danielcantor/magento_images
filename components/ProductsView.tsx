@@ -325,7 +325,7 @@ export default function ProductsView({ syncStoresEnabled = false }: { syncStores
             Quitar selección
           </button>
           <span className="spacer" />
-          <button onClick={attachToSelected} disabled={job.running}>
+          <button className="accent" onClick={attachToSelected} disabled={job.running}>
             Anexar imagen…
           </button>
           {syncStoresEnabled && (

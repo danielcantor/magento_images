@@ -17,7 +17,7 @@ import {
   useSortable,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { api } from "@/lib/api";
+import { api, syncAllStores } from "@/lib/api";
 import { replaceImage } from "@/lib/bulk";
 import { prepareImage } from "@/lib/imagePrep";
 import type { MediaEntry, MediaRole } from "@/lib/types";
@@ -62,7 +62,7 @@ export default function MediaEditor({ sku, name, syncStoresEnabled = false, expe
 
   /** Iguala las tiendas y actualiza el aviso. */
   const syncStoresNow = useCallback(async () => {
-    const r = await api.syncStores(sku);
+    const r = await syncAllStores(sku);
     setStoreNote(
       r.stillDifferent.length
         ? `Siguen distintas: ${r.stillDifferent.join(", ")}`

@@ -2,7 +2,7 @@ import { BadRequest, handle } from "@/lib/apiHandler";
 import { saveGallery, type GalleryChange } from "@/lib/magento";
 import { allowedRoleCodes, parseTypes } from "@/lib/uploadValidation";
 
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 /** Guarda varios cambios de la galería de un producto en un solo guardado. Body: { changes: [{id, position?, label?, disabled?, types?}] } */
 export const POST = handle(async (req: Request, ctx: { params: Promise<{ sku: string }> }) => {

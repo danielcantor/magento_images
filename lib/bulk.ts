@@ -1,7 +1,7 @@
 "use client";
 // Trabajos masivos que corren en el navegador. Cada SKU se procesa en serie
 // (para no pisar la galería del mismo producto) y varios SKU en paralelo.
-import { api, ApiError, withRetry } from "./api";
+import { api, ApiError, syncAllStores, withRetry } from "./api";
 import { packItems } from "./packing";
 import { DEFAULT_QUEUE, type QueueSettings, type UploadMode } from "./queueSettings";
 import { prepareImage } from "./imagePrep";
@@ -59,7 +59,7 @@ const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 /** Iguala las tiendas de un SKU a lo general y lo deja en el log (no cuenta como paso). */
 async function syncSkuStores(sku: string, log: (line: LogLine) => void) {
   try {
-    const r = await withRetry(() => api.syncStores(sku));
+    const r = await syncAllStores(sku);
     if (r.stillDifferent.length) {
       log({ sku, action: "tiendas", status: "error", message: `Siguen distintas: ${r.stillDifferent.join(", ")}` });
     } else {
@@ -81,7 +81,8 @@ async function syncSkuStores(sku: string, log: (line: LogLine) => void) {
 
 export type { QueueSettings, UploadMode };
 
-const PACK_LIMITS = { maxBytes: 3.5 * 1024 * 1024, maxItems: 40 };
+// Envíos chicos: Magento tarda en encolar y cada petición debe terminar bien antes del límite.
+const PACK_LIMITS = { maxBytes: 2 * 1024 * 1024, maxItems: 10 };
 
 interface QueueItem {
   sku: string;
@@ -114,7 +115,7 @@ async function enqueueAndTrack(items: QueueItem[], step: Step, cb: JobCallbacks,
     if (cb.signal?.aborted) break;
     cb.onPhase?.(`Enviando a la cola de Magento… (${sent}/${items.length})`);
     try {
-      const res = await withRetry(() => api.enqueueMedia(pack));
+      const res = await withRetry(() => api.enqueueMedia(pack), 2, { idempotent: false });
       for (const b of res.bulks) {
         const slice = pack.slice(b.from, b.from + b.items.length);
         const accepted: QueueItem[] = [];
@@ -259,11 +260,13 @@ export async function runBulkUpload(
             queued.push({ sku, fileName: f.fileName, file: prepared, position: offset + i + 1, types: giveRoles && i === 0 ? firstRoles : [] });
             continue;
           }
-          await withRetry(() =>
-            api.uploadMedia(sku, prepared, {
+          await withRetry(
+            () => api.uploadMedia(sku, prepared, {
               position: offset + i + 1,
               types: giveRoles && i === 0 ? firstRoles : [],
             }),
+            2,
+            { idempotent: false },
           );
           step({ sku, action: "subir", fileName: f.fileName, status: "ok" });
           if (!touched.includes(sku)) touched.push(sku);
@@ -350,8 +353,10 @@ export async function runSharedUpload(
 
         for (let i = 0; i < images.length; i++) {
           if (cb.signal?.aborted) return;
-          await withRetry(() =>
-            api.uploadMedia(sku, prepared[i], { position: plan.newPositions[i], types: images[i].types }),
+          await withRetry(
+            () => api.uploadMedia(sku, prepared[i], { position: plan.newPositions[i], types: images[i].types }),
+            2,
+            { idempotent: false },
           );
           uploaded++;
         }
@@ -458,7 +463,7 @@ export async function runStoreSync(skus: string[], cb: JobCallbacks): Promise<vo
     cb.concurrency ?? 3,
     async (sku) => {
       try {
-        const r = await withRetry(() => api.syncStores(sku));
+        const r = await syncAllStores(sku);
         step(
           r.stillDifferent.length
             ? { sku, action: "igualar tiendas", status: "error", message: `Siguen distintas: ${r.stillDifferent.join(", ")}` }

@@ -54,6 +54,8 @@ interface FetchOptions {
   prefix?: "" | "async/bulk/";
   /** Código de store view; por defecto MAGENTO_STORE_CODE ("all" = general). */
   store?: string;
+  /** Tiempo máximo de cada intento (por defecto 20 s lectura, 45 s escritura). */
+  timeoutMs?: number;
 }
 
 export async function magentoFetch<T>(
@@ -77,29 +79,43 @@ export async function magentoFetch<T>(
     headers.Authorization = `Bearer ${token}`;
   }
 
+  const method = init.method ?? "GET";
+  // Reintentar solo lo que no tiene efecto doble: un POST (crear imagen, encolar)
+  // cortado a mitad pudo haberse aplicado en Magento.
+  const idempotent = method !== "POST";
+  const timeoutMs = opts.timeoutMs ?? (method === "GET" ? 20_000 : 45_000);
+
   for (let attempt = 0; ; attempt++) {
     let res: Response;
+    let text: string;
     try {
       res = await fetch(url, {
-        method: init.method ?? "GET",
+        method,
         headers,
         body: init.body === undefined ? undefined : JSON.stringify(init.body),
         cache: "no-store",
+        signal: AbortSignal.timeout(timeoutMs),
       });
+      // Leer el cuerpo dentro del try: Magento a veces corta la conexión a mitad de respuesta (ECONNRESET).
+      text = await res.text();
     } catch (err) {
-      if (attempt < retries) {
+      if (idempotent && attempt < retries) {
         await sleep(500 * 2 ** attempt);
         continue;
       }
-      throw new MagentoError(`No se pudo conectar con Magento: ${(err as Error).message}`, 502);
+      const e = err as Error;
+      const why = e.name === "TimeoutError" || e.name === "AbortError" ? "Magento no respondió a tiempo" : `se cortó la conexión con Magento (${e.message})`;
+      throw new MagentoError(
+        idempotent ? `No se pudo completar: ${why}.` : `No se pudo confirmar: ${why}. Puede que se haya aplicado igual; revisá el producto antes de reintentar.`,
+        idempotent ? 502 : 504,
+      );
     }
 
-    if ((res.status === 429 || res.status >= 500) && attempt < retries) {
+    if ((res.status === 429 || (idempotent && res.status >= 500)) && attempt < retries) {
       await sleep(500 * 2 ** attempt);
       continue;
     }
 
-    const text = await res.text();
     let body: unknown = null;
     try {
       body = text ? JSON.parse(text) : null;
@@ -360,7 +376,7 @@ export async function addMedia(
         },
       },
     },
-  });
+  }, 1, { timeoutMs: 120_000 });
   return Number(id);
 }
 
@@ -441,7 +457,7 @@ export async function saveGallery(sku: string, changes: GalleryChange[]): Promis
       `/products/${enc(sku)}`,
       { method: "PUT", body: { product: { sku, media_gallery_entries: buildGallery(raw, changes) } } },
       1,
-      { store: "all" },
+      { store: "all", timeoutMs: 120_000 },
     );
   } catch (err) {
     if (err instanceof MagentoError && err.status >= 400 && err.status < 500 && err.status !== 401 && err.status !== 403) {
@@ -503,7 +519,7 @@ export async function enqueueMediaBulk(items: BulkMediaItem[]): Promise<BulkEnqu
   const res = await magentoFetch<{
     bulk_uuid: string;
     request_items?: { id: number; status: string; error_message?: string | null }[];
-  }>("/products/bySku/media", { method: "POST", body: items }, 1, { prefix: "async/bulk/" });
+  }>("/products/bySku/media", { method: "POST", body: items }, 1, { prefix: "async/bulk/", timeoutMs: 240_000 });
   const byId = new Map((res.request_items ?? []).map((r) => [Number(r.id), r]));
   return {
     bulkUuid: res.bulk_uuid,
@@ -547,14 +563,30 @@ export async function getStoreViews(): Promise<{ code: string; name: string }[]>
   return (await getWebsites()).flatMap((w) => w.stores.map((st) => ({ code: st.code, name: st.name })));
 }
 
-export async function getStoreDiffs(sku: string): Promise<StoreDiff[]> {
-  const [general, stores] = await Promise.all([getMedia(sku), getStoreViews()]);
+/** Ejecuta `fn` sobre `items` con como mucho `limit` a la vez, conservando el orden. */
+async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const out: R[] = new Array(items.length);
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, async () => {
+      while (next < items.length) {
+        const i = next++;
+        out[i] = await fn(items[i]);
+      }
+    }),
+  );
+  return out;
+}
+
+export async function getStoreDiffs(sku: string, onlyStore?: string): Promise<StoreDiff[]> {
+  const [general, all] = await Promise.all([getMedia(sku), getStoreViews()]);
+  const stores = onlyStore ? all.filter((s) => s.code === onlyStore) : all;
+  const medias = await mapLimit(stores, 3, (st) => getMedia(sku, st.code));
   const out: StoreDiff[] = [];
-  for (const st of stores) {
-    const media = await getMedia(sku, st.code);
-    const diffs = diffEntries(general, media);
+  stores.forEach((st, i) => {
+    const diffs = diffEntries(general, medias[i]);
     if (diffs.length) out.push({ storeCode: st.code, storeName: st.name, diffs });
-  }
+  });
   return out;
 }
 
@@ -565,9 +597,10 @@ export interface SyncResult {
   stillDifferent: string[];
 }
 
-export async function syncStores(sku: string): Promise<SyncResult> {
+/** Iguala a lo general las tiendas que difieren (o solo `onlyStore`, para peticiones cortas). */
+export async function syncStores(sku: string, onlyStore?: string): Promise<SyncResult> {
   const general = await getMedia(sku);
-  const diffs = await getStoreDiffs(sku);
+  const diffs = await getStoreDiffs(sku, onlyStore);
   const result: SyncResult = { storesSynced: [], entriesUpdated: 0, stillDifferent: [] };
   for (const d of diffs) {
     for (const entry of planStoreUpdates(general, d.diffs)) {

@@ -3,7 +3,7 @@ import { enqueueMediaBulk, type BulkMediaItem } from "@/lib/magento";
 import { safeFileName } from "@/lib/skuMatcher";
 import { allowedRoleCodes, fileToContent, parseTypes, type FileContent } from "@/lib/uploadValidation";
 
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 /** Máximo de datos por petición a Magento (base64). Ajustable si PHP admite más. */
 const MAGENTO_MAX_BYTES = (Number(process.env.MAGENTO_BULK_MAX_MB) || 16) * 1024 * 1024;

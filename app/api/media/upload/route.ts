@@ -3,7 +3,7 @@ import { addMedia } from "@/lib/magento";
 import { safeFileName } from "@/lib/skuMatcher";
 import { allowedRoleCodes, fileToContent, parseTypes } from "@/lib/uploadValidation";
 
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 // multipart: sku, file, position?, label?, types? (JSON), disabled?
 export const POST = handle(async (req: Request) => {

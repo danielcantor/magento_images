@@ -13,7 +13,13 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
     window.location.href = "/login";
   }
   const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new ApiError(body.error ?? `Error ${res.status}`, res.status);
+  if (!res.ok) {
+    const fallback =
+      res.status === 504
+        ? "Magento tardó demasiado en responder. Puede que el cambio se haya aplicado igual: revisá el producto antes de reintentar."
+        : `Error ${res.status}`;
+    throw new ApiError(body.error ?? fallback, res.status);
+  }
   return body as T;
 }
 
@@ -39,10 +45,11 @@ export const api = {
       `/api/media/${enc(sku)}/stores`,
     ).then((r) => r.stores),
 
-  syncStores: (sku: string) =>
-    request<{ storesSynced: string[]; entriesUpdated: number; stillDifferent: string[] }>(`/api/media/${enc(sku)}/stores`, {
-      method: "POST",
-    }),
+  syncStores: (sku: string, store?: string) =>
+    request<{ storesSynced: string[]; entriesUpdated: number; stillDifferent: string[] }>(
+      `/api/media/${enc(sku)}/stores${store ? `?store=${enc(store)}` : ""}`,
+      { method: "POST" },
+    ),
 
   roles: () => request<{ roles: MediaRole[]; firstImageRoles: string[] }>("/api/roles"),
 
@@ -105,16 +112,50 @@ export const api = {
     request<{ operations: { state: "open" | "complete" | "failed"; message: string | null }[] }>(`/api/media/bulk/${enc(uuid)}`),
 };
 
-/** Reintenta errores transitorios (red, 429, 5xx) con espera creciente. */
-export async function withRetry<T>(fn: () => Promise<T>, retries = 2): Promise<T> {
+/**
+ * Reintenta errores transitorios (red, 429, 5xx) con espera creciente.
+ * Con `idempotent: false` (subir o encolar imágenes) solo reintenta 429: un
+ * corte o un tiempo agotado pudo haberse aplicado y reintentar duplicaría.
+ */
+export async function withRetry<T>(fn: () => Promise<T>, retries = 2, opts: { idempotent?: boolean } = {}): Promise<T> {
+  const idempotent = opts.idempotent ?? true;
   for (let attempt = 0; ; attempt++) {
     try {
       return await fn();
     } catch (err) {
       const status = err instanceof ApiError ? err.status : 0;
-      const transient = status === 0 || status === 429 || status >= 500;
+      const transient = idempotent ? status === 0 || status === 429 || status >= 500 : status === 429;
       if (!transient || attempt >= retries) throw err;
       await new Promise((r) => setTimeout(r, 1000 * 2 ** attempt));
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Igualar tiendas: una petición por store view, para que cada una sea corta.
+
+let storeCodes: Promise<string[]> | null = null;
+
+function getStoreCodes(): Promise<string[]> {
+  storeCodes ??= api
+    .websites()
+    .then((ws) => ws.flatMap((w) => w.stores.map((s) => s.code)))
+    .catch((e) => {
+      storeCodes = null;
+      throw e;
+    });
+  return storeCodes;
+}
+
+/** Iguala todas las tiendas de un SKU a lo general, de a una tienda por petición. */
+export async function syncAllStores(sku: string): Promise<{ storesSynced: string[]; entriesUpdated: number; stillDifferent: string[] }> {
+  const codes = await getStoreCodes();
+  const total = { storesSynced: [] as string[], entriesUpdated: 0, stillDifferent: [] as string[] };
+  for (const code of codes) {
+    const r = await withRetry(() => api.syncStores(sku, code));
+    total.storesSynced.push(...r.storesSynced);
+    total.entriesUpdated += r.entriesUpdated;
+    total.stillDifferent.push(...r.stillDifferent);
+  }
+  return total;
 }

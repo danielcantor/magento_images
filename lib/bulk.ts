@@ -357,16 +357,9 @@ export async function runSharedUpload(
         }
 
         if (plan.moves.length) {
-          // Releer: al subir con roles, Magento se los quitó a otras imágenes.
-          const fresh = new Map((await withRetry(() => api.getMedia(sku))).map((e) => [e.id, e]));
-          for (const mv of plan.moves) {
-            const e = fresh.get(mv.id);
-            if (!e) continue;
-            await withRetry(() =>
-              api.updateMedia(sku, { id: e.id, label: e.label, disabled: e.disabled, types: e.types, position: mv.position }),
-            );
-            moved++;
-          }
+          // Un solo guardado; los roles actuales (ya ajustados por Magento al subir) se conservan.
+          await withRetry(() => api.saveGallery(sku, plan.moves.map((mv) => ({ id: mv.id, position: mv.position }))));
+          moved = plan.moves.length;
         }
         step({ sku, action: "anexar", status: "ok", message: `${uploaded} imagen(es) anexadas, ${moved} movidas` });
         if (opts.syncStores) await syncSkuStores(sku, cb.onLog);
@@ -410,33 +403,15 @@ async function runSharedUploadQueued(skus: string[], images: SharedImage[], cb: 
         return;
       }
       const plan = planInsert(existing, images.map((i) => i.position));
-      const byId = new Map(existing.map((e) => [e.id, e]));
-      // Correr primero las existentes; los roles nuevos se aplican al procesar la cola.
-      const applied: number[] = [];
-      try {
-        for (const mv of plan.moves) {
-          if (cb.signal?.aborted) return;
-          const e = byId.get(mv.id)!;
-          await withRetry(() => api.updateMedia(sku, { id: e.id, label: e.label, disabled: e.disabled, types: e.types, position: mv.position }));
-          applied.push(mv.id);
+      // Correr primero las existentes, en un solo guardado (todo o nada).
+      if (plan.moves.length) {
+        if (cb.signal?.aborted) return;
+        try {
+          await withRetry(() => api.saveGallery(sku, plan.moves.map((mv) => ({ id: mv.id, position: mv.position }))));
+        } catch (e) {
+          failAll(sku, `${msg(e)} (al correr las imágenes existentes; no se cambió nada)`);
+          return;
         }
-      } catch (e) {
-        // Deshacer lo ya movido para no dejar huecos en el orden.
-        let reverted = 0;
-        for (const id of [...applied].reverse()) {
-          const orig = byId.get(id)!;
-          try {
-            await withRetry(() => api.updateMedia(sku, { id, label: orig.label, disabled: orig.disabled, types: orig.types, position: orig.position }));
-            reverted++;
-          } catch {
-            /* se informa abajo */
-          }
-        }
-        const detail = applied.length
-          ? ` (al correr las imágenes existentes: ${applied.length} de ${plan.moves.length} movidas, ${reverted === applied.length ? "revertidas" : `${reverted} revertidas; revisá el orden en el editor`})`
-          : " (al correr las imágenes existentes; no se cambió nada)";
-        failAll(sku, msg(e) + detail);
-        return;
       }
       images.forEach((img, i) =>
         queued.push({ sku, fileName: img.file.name, file: prepared[i], position: plan.newPositions[i], types: img.types }),

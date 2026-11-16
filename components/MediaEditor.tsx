@@ -170,10 +170,10 @@ export default function MediaEditor({ sku, name, syncStoresEnabled = false, expe
     run("Guardando…", async () => {
       // Primero las que ganan roles, luego el resto, para que Magento no los reasigne mal.
       const changed = items
-        .map((e, i) => ({ ...e, position: i + 1 }))
-        .filter((e) => dirtyIds.has(e.id))
-        .sort((a, b) => b.types.length - a.types.length);
-      for (const e of changed) await api.updateMedia(sku, e);
+        .map((e, i) => ({ id: e.id, label: e.label, disabled: e.disabled, types: e.types, position: i + 1 }))
+        .filter((e) => dirtyIds.has(e.id));
+      // Un solo guardado del producto con todos los cambios.
+      await api.saveGallery(sku, changed);
     });
 
   const remove = (e: MediaEntry) => {

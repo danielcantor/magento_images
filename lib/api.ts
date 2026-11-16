@@ -57,6 +57,12 @@ export const api = {
   updateMedia: (sku: string, e: Pick<MediaEntry, "id" | "label" | "position" | "disabled" | "types">) =>
     request(`/api/media/${enc(sku)}/${e.id}`, json("PUT", e)),
 
+  /** Varios cambios de la galería en un solo guardado del producto. */
+  saveGallery: (
+    sku: string,
+    changes: { id: number; position?: number; label?: string | null; disabled?: boolean; types?: string[] }[],
+  ) => request(`/api/media/${enc(sku)}/gallery`, json("POST", { changes })),
+
   deleteMedia: (sku: string, id: number) =>
     request(`/api/media/${enc(sku)}/${id}`, { method: "DELETE" }),
 

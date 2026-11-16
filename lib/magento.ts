@@ -368,11 +368,19 @@ export async function addMedia(
 const CANT_SAVE = /can.?t be saved|cannot be saved|could not be saved|could not save/i;
 
 export const PRODUCT_NOT_SAVABLE_MESSAGE =
-  "Magento no puede guardar este producto (suele ser un dato inválido del producto, por ejemplo una URL duplicada o un atributo obligatorio vacío). Abrilo y guardalo desde el Admin de Magento para ver el error exacto.";
+  "Magento no puede guardar este producto. Abrilo y guardalo desde el Admin de Magento para ver el error exacto.";
 
 type MediaInput = { label: string | null; position: number; disabled: boolean; types: string[] };
 
-function putMedia(sku: string, id: number, input: MediaInput, store?: string, file?: string) {
+export interface GalleryChange {
+  id: number;
+  position?: number;
+  label?: string | null;
+  disabled?: boolean;
+  types?: string[];
+}
+
+function putMedia(sku: string, id: number, input: MediaInput, store?: string) {
   return magentoFetch<boolean>(
     `/products/${enc(sku)}/media/${id}`,
     {
@@ -385,7 +393,6 @@ function putMedia(sku: string, id: number, input: MediaInput, store?: string, fi
           position: input.position,
           disabled: input.disabled,
           types: input.types,
-          ...(file ? { file } : {}),
         },
       },
     },
@@ -394,12 +401,65 @@ function putMedia(sku: string, id: number, input: MediaInput, store?: string, fi
   );
 }
 
+type RawEntry = MediaEntry & { extension_attributes?: unknown };
+
+/** Arma la galería completa con los cambios aplicados (función pura, exportada para tests). */
+export function buildGallery(raw: RawEntry[], changes: GalleryChange[]): RawEntry[] {
+  const byId = new Map(changes.map((c) => [c.id, c]));
+  // Un rol asignado en los cambios se quita de las demás imágenes.
+  const claimed = new Set(changes.flatMap((c) => c.types ?? []));
+  return raw.map((e) => {
+    const c = byId.get(e.id);
+    const out: RawEntry = {
+      id: e.id,
+      media_type: e.media_type,
+      label: (c && c.label !== undefined ? c.label : e.label) ?? "",
+      position: c?.position ?? e.position,
+      disabled: c?.disabled ?? e.disabled,
+      types: c?.types ?? (e.types ?? []).filter((t) => !claimed.has(t)),
+      file: e.file,
+    };
+    if (e.extension_attributes) out.extension_attributes = e.extension_attributes;
+    return out;
+  });
+}
+
 /**
- * Actualiza rol, posición, alt y visibilidad. Primero sin `file` (en algunas
- * versiones de Magento enviarlo duplica la imagen). Si Magento responde «The
- * product can't be saved», que en otras versiones pasa justamente por faltar
- * `file`, se reintenta una vez con la ruta actual de la imagen. Si aparece una
- * copia, se deja la que tiene los valores nuevos y se borra la anterior.
+ * Guarda varios cambios de la galería en un solo guardado del producto
+ * (PUT /V1/products/{sku} con media_gallery_entries). Envía TODAS las entradas
+ * (incluidos videos), porque las que faltan Magento las borra. Siempre en el
+ * store general, para no copiar atributos a una tienda.
+ */
+export async function saveGallery(sku: string, changes: GalleryChange[]): Promise<void> {
+  if (!changes.length) return;
+  const raw = await magentoFetch<RawEntry[]>(`/products/${enc(sku)}/media`, {}, 3, { store: "all" });
+  for (const c of changes) {
+    if (!raw.some((e) => e.id === c.id)) throw new MagentoError("Una imagen ya no existe en Magento. Recargá el producto.", 404);
+  }
+  try {
+    await magentoFetch(
+      `/products/${enc(sku)}`,
+      { method: "PUT", body: { product: { sku, media_gallery_entries: buildGallery(raw, changes) } } },
+      1,
+      { store: "all" },
+    );
+  } catch (err) {
+    if (err instanceof MagentoError && err.status >= 400 && err.status < 500 && err.status !== 401 && err.status !== 403) {
+      throw new MagentoError(
+        CANT_SAVE.test(err.message) ? PRODUCT_NOT_SAVABLE_MESSAGE : `Magento no puede guardar este producto: ${err.message}`,
+        422,
+      );
+    }
+    throw err;
+  }
+}
+
+/**
+ * Actualiza rol, posición, alt y visibilidad de una imagen. Primero con el
+ * endpoint de la imagen (sin `file`: en 2.4.x enviarlo la trata como nueva).
+ * Si Magento responde «The product can't be saved» en el store general, guarda
+ * la galería completa por el endpoint del producto, que además devuelve el
+ * error real si lo hay.
  */
 export async function updateMedia(sku: string, id: number, input: MediaInput, store?: string): Promise<void> {
   try {
@@ -407,27 +467,11 @@ export async function updateMedia(sku: string, id: number, input: MediaInput, st
     return;
   } catch (err) {
     if (!(err instanceof MagentoError) || !CANT_SAVE.test(err.message)) throw err;
-  }
-
-  const before = await getMedia(sku, store);
-  const current = before.find((e) => e.id === id);
-  if (!current) throw new MagentoError("La imagen ya no existe en Magento. Recargá el producto.", 404);
-
-  try {
-    await putMedia(sku, id, input, store, current.file);
-  } catch (err) {
-    if (err instanceof MagentoError && CANT_SAVE.test(err.message)) {
+    if (store && store !== "all" && store !== getConfig().storeCode) {
       throw new MagentoError(PRODUCT_NOT_SAVABLE_MESSAGE, 422);
     }
-    throw err;
   }
-
-  const after = await getMedia(sku, store);
-  const beforeIds = new Set(before.map((e) => e.id));
-  const added = after.filter((e) => !beforeIds.has(e.id));
-  if (added.length && after.some((e) => e.id === id)) {
-    await deleteMedia(sku, id);
-  }
+  await saveGallery(sku, [{ id, ...input }]);
 }
 
 export async function deleteMedia(sku: string, id: number): Promise<void> {

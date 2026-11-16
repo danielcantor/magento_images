@@ -9,9 +9,10 @@ interface Props {
   running: boolean;
   cancelled: boolean;
   onCancel: () => void;
+  phase?: string | null;
 }
 
-export default function JobProgress({ title, progress, lines, running, cancelled, onCancel }: Props) {
+export default function JobProgress({ title, progress, lines, running, cancelled, onCancel, phase }: Props) {
   const [onlyErrors, setOnlyErrors] = useState(false);
   if (!progress) return null;
   const pct = progress.total ? Math.round((progress.done / progress.total) * 100) : 100;
@@ -33,6 +34,11 @@ export default function JobProgress({ title, progress, lines, running, cancelled
           </button>
         )}
       </div>
+      {running && phase && (
+        <div className="alert info small" role="status">
+          ⏳ {phase}
+        </div>
+      )}
       <div className="progress" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
         <div style={{ width: `${pct}%` }} />
       </div>
@@ -56,6 +62,7 @@ export default function JobProgress({ title, progress, lines, running, cancelled
               <span className={`badge ${l.status === "ok" ? "ok" : "err"}`}>{l.status === "ok" ? "OK" : "ERROR"}</span>{" "}
               <b>{l.sku}</b> · {l.action}
               {l.fileName && <> · {l.fileName}</>}
+              {l.bulk && <span className="muted"> · bulk {l.bulk.slice(0, 8)}</span>}
               {l.message && <span className="muted"> — {l.message}</span>}
             </div>
           ))}

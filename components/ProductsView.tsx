@@ -111,6 +111,7 @@ export default function ProductsView() {
         running={job.running}
         cancelled={job.cancelled}
         onCancel={job.cancel}
+        phase={job.phase}
       />
 
       {error && <div className="alert">{error}</div>}

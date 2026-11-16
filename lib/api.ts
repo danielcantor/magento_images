@@ -55,6 +55,29 @@ export const api = {
     fd.set("disabled", String(Boolean(opts.disabled)));
     return request<{ id: number }>("/api/media/upload", { method: "POST", body: fd });
   },
+
+  /** Encola subidas en la API bulk de Magento. Un mismo File se envía una sola vez. */
+  enqueueMedia: (items: { sku: string; file: File; position: number; types: string[] }[]) => {
+    const fd = new FormData();
+    const fields = new Map<File, string>();
+    const payload = items.map((it) => {
+      let field = fields.get(it.file);
+      if (!field) {
+        field = `f${fields.size}`;
+        fields.set(it.file, field);
+        fd.set(field, it.file);
+      }
+      return { sku: it.sku, field, position: it.position, types: it.types };
+    });
+    fd.set("items", JSON.stringify(payload));
+    return request<{ bulks: { bulkUuid: string; from: number; items: { accepted: boolean; message?: string }[] }[] }>(
+      "/api/media/bulk",
+      { method: "POST", body: fd },
+    );
+  },
+
+  bulkStatus: (uuid: string) =>
+    request<{ operations: { state: "open" | "complete" | "failed"; message: string | null }[] }>(`/api/media/bulk/${enc(uuid)}`),
 };
 
 /** Reintenta errores transitorios (red, 429, 5xx) con espera creciente. */

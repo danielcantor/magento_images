@@ -49,6 +49,8 @@ export const NO_PERMISSION_MESSAGE =
 interface FetchOptions {
   /** false = petición sin token (login). Por defecto se usa el token de la petición. */
   auth?: boolean;
+  /** "async/bulk/" para la API asíncrona: /rest/{store}/async/bulk/V1/... */
+  prefix?: "" | "async/bulk/";
 }
 
 export async function magentoFetch<T>(
@@ -58,7 +60,7 @@ export async function magentoFetch<T>(
   opts: FetchOptions = {},
 ): Promise<T> {
   const cfg = getConfig();
-  const url = `${cfg.baseUrl}/rest/${cfg.storeCode}/V1${path}`;
+  const url = `${cfg.baseUrl}/rest/${cfg.storeCode}/${opts.prefix ?? ""}V1${path}`;
   const userMode = getAuthMode() === "magento";
 
   const headers: Record<string, string> = { "Content-Type": "application/json", Accept: "application/json" };
@@ -289,4 +291,64 @@ export async function updateMedia(
 
 export async function deleteMedia(sku: string, id: number): Promise<void> {
   await magentoFetch<boolean>(`/products/${enc(sku)}/media/${id}`, { method: "DELETE" });
+}
+
+// ---------------------------------------------------------------------------
+// API asíncrona (bulk): las operaciones quedan en System > Action Logs > Bulk Actions.
+
+export interface BulkMediaItem {
+  sku: string;
+  entry: {
+    media_type: "image";
+    label: string;
+    position: number;
+    disabled: boolean;
+    types: string[];
+    content: { base64_encoded_data: string; type: string; name: string };
+  };
+}
+
+export interface BulkEnqueueResult {
+  bulkUuid: string;
+  /** Estado de aceptación por item, en el mismo orden enviado. */
+  items: { accepted: boolean; message?: string }[];
+}
+
+export async function enqueueMediaBulk(items: BulkMediaItem[]): Promise<BulkEnqueueResult> {
+  const res = await magentoFetch<{
+    bulk_uuid: string;
+    request_items?: { id: number; status: string; error_message?: string | null }[];
+  }>("/products/bySku/media", { method: "POST", body: items }, 1, { prefix: "async/bulk/" });
+  const byId = new Map((res.request_items ?? []).map((r) => [Number(r.id), r]));
+  return {
+    bulkUuid: res.bulk_uuid,
+    items: items.map((_, i) => {
+      const r = byId.get(i);
+      const accepted = !r || r.status === "accepted";
+      return accepted ? { accepted } : { accepted, message: r?.error_message || "Rechazado por Magento" };
+    }),
+  };
+}
+
+/** Estados de operación de Magento. */
+export const BULK_STATUS = { complete: 1, failedRetriable: 2, failed: 3, open: 4, rejected: 5 } as const;
+
+export type OperationState = "open" | "complete" | "failed";
+
+export interface BulkStatusResult {
+  /** Operaciones en el orden en que se enviaron. Nunca incluye el contenido de la imagen. */
+  operations: { state: OperationState; message: string | null }[];
+}
+
+export async function getBulkStatus(uuid: string): Promise<BulkStatusResult> {
+  const res = await magentoFetch<{
+    operations_list?: { id: number; status: number; result_message?: string | null; serialized_data?: string }[];
+  }>(`/bulk/${encodeURIComponent(uuid)}/detailed-status`);
+  const ops = [...(res.operations_list ?? [])].sort((a, b) => a.id - b.id);
+  return {
+    operations: ops.map((o) => ({
+      state: o.status === BULK_STATUS.complete ? "complete" : o.status === BULK_STATUS.open ? "open" : "failed",
+      message: o.result_message ?? null,
+    })),
+  };
 }

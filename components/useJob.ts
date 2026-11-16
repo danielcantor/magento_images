@@ -9,6 +9,7 @@ export function useJob() {
   const [lines, setLines] = useState<LogLine[]>([]);
   const [running, setRunning] = useState(false);
   const [cancelled, setCancelled] = useState(false);
+  const [phase, setPhase] = useState<string | null>(null);
   const ctrl = useRef<AbortController | null>(null);
 
   const start = useCallback(async (kind: string, fn: (cb: JobCallbacks) => Promise<void>) => {
@@ -32,10 +33,12 @@ export function useJob() {
           last = p;
           setProgress(p);
         },
+        onPhase: setPhase,
       });
     } finally {
       window.removeEventListener("beforeunload", beforeUnload);
       setRunning(false);
+      setPhase(null);
       setCancelled(controller.signal.aborted);
       void saveJobLog(kind, last, collected);
     }
@@ -47,5 +50,5 @@ export function useJob() {
     setLines([]);
   }, []);
 
-  return { progress, lines, running, cancelled, start, cancel, reset };
+  return { progress, lines, running, cancelled, phase, start, cancel, reset };
 }

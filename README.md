@@ -75,6 +75,24 @@ Requisitos en Magento:
 
 `AUTH_MODE=magento` tiene prioridad sobre `DASHBOARD_PASSWORD` y Supabase.
 
+## Historial en el Admin de Magento (Bulk Actions)
+
+Con `MAGENTO_UPLOAD_MODE=bulk`, las subidas de **Subida masiva** e **Imagen a varios SKU** se envían a la API asíncrona de Magento (`/async/bulk/V1/products/bySku/media`). Cada envío aparece en **System → Action Logs → Bulk Actions**, a nombre del usuario que lo hizo. Para que se vea el nombre real de cada persona, combínalo con `AUTH_MODE=magento`.
+
+- **Procesamiento**: Magento procesa las subidas con su cron. El dashboard muestra «Esperando a que Magento procese…» y el resultado de cada imagen cuando termina. El CSV incluye el `bulk_uuid`.
+- **Agrupación**: un lote grande puede verse como varias entradas en Bulk Actions. Cada envío lleva como máximo ~3,5 MB, por el límite de Vercel.
+- **Lo que sigue siendo inmediato y no aparece en Bulk Actions**:
+  - Borrar la galería anterior (modo reemplazar).
+  - Correr las imágenes existentes en «Imagen a varios SKU».
+  - Todo el editor de un producto.
+- **Si pulsas Detener**: lo ya encolado se procesa igualmente en Magento.
+
+Requisitos en Magento:
+
+- **Cron y consumidor**: el cron debe estar activo y procesar el consumidor `async.operations.all`. Lo hace por defecto con `consumers_runner`; también puedes lanzarlo con `bin/magento queue:consumers:start async.operations.all`. Si no corre, el dashboard avisa tras 15 minutos y las imágenes quedan en cola.
+- **Permiso Bulk Actions**: el rol del usuario necesita también **System → Action Logs → Bulk Actions** para que el dashboard pueda leer el estado.
+- **Tamaño de envío**: PHP debe aceptar envíos de hasta `MAGENTO_BULK_MAX_MB` (16 MB por defecto, en `post_max_size`).
+
 ## 3. (Opcional) Login por usuario con Supabase
 
 Úsalo si varias personas van a usar el dashboard y quieres saber quién hizo cada lote.

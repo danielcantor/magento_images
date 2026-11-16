@@ -2,7 +2,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useDropzone } from "react-dropzone";
 import { api } from "@/lib/api";
-import { runSharedUpload } from "@/lib/bulk";
+import { runSharedUpload, type QueueSettings, type UploadMode } from "@/lib/bulk";
+import QueueNotice from "./QueueNotice";
 import { parseSkuCsv, parseSkuText, SHARED_SKUS_KEY } from "@/lib/skuList";
 import { ROLES, ROLE_LABELS } from "@/lib/types";
 import JobProgress from "./JobProgress";
@@ -20,7 +21,7 @@ interface Img {
 
 let nextKey = 1;
 
-export default function SharedUploadView() {
+export default function SharedUploadView({ uploadMode = "direct", queue }: { uploadMode?: UploadMode; queue?: QueueSettings }) {
   const [skuText, setSkuText] = useState("");
   const [existing, setExisting] = useState<string[]>([]);
   const [checked, setChecked] = useState<Set<string>>(new Set());
@@ -127,13 +128,14 @@ export default function SharedUploadView() {
     const desc = images.map((i) => `posición ${i.position}${i.types.length ? ` (${i.types.map((t) => ROLE_LABELS[t as keyof typeof ROLE_LABELS]).join(", ")})` : ""}`).join("; ");
     if (!confirm(`Se anexarán ${images.length} imagen(es) a ${valid.length} producto(s): ${desc}. Las imágenes existentes desde esa posición bajarán un puesto. ¿Continuar?`)) return;
     await job.start("anexar-varios", (cb) =>
-      runSharedUpload(valid, images.map(({ file, position, types }) => ({ file, position, types })), cb),
+      runSharedUpload(valid, images.map(({ file, position, types }) => ({ file, position, types })), cb, { uploadMode, queue }),
     );
   }
 
   return (
     <div className="stack">
       <h1>Imagen a varios SKU</h1>
+      {uploadMode === "bulk" && <QueueNotice />}
       <p className="muted" style={{ marginTop: -8 }}>
         Sube una o varias imágenes a una lista de productos, cada una en la posición que elijas. Las imágenes que ya
         estaban desde esa posición bajan un puesto; no se borra nada.
@@ -278,6 +280,7 @@ export default function SharedUploadView() {
         running={job.running}
         cancelled={job.cancelled}
         onCancel={job.cancel}
+        phase={job.phase}
       />
     </div>
   );

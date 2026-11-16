@@ -1,7 +1,9 @@
 "use client";
 // Trabajos masivos que corren en el navegador. Cada SKU se procesa en serie
 // (para no pisar la galería del mismo producto) y varios SKU en paralelo.
-import { api, withRetry } from "./api";
+import { api, ApiError, withRetry } from "./api";
+import { packItems } from "./packing";
+import { DEFAULT_QUEUE, type QueueSettings, type UploadMode } from "./queueSettings";
 import { prepareImage } from "./imagePrep";
 import { planInsert } from "./positions";
 import { runPool } from "./pool";
@@ -16,6 +18,8 @@ export interface LogLine {
   fileName?: string;
   status: LogStatus;
   message?: string;
+  /** bulk_uuid de Magento (modo bulk). */
+  bulk?: string;
 }
 
 export interface Progress {
@@ -28,6 +32,8 @@ export interface Progress {
 export interface JobCallbacks {
   onLog: (line: LogLine) => void;
   onProgress: (p: Progress) => void;
+  /** Texto de la fase actual (p. ej. «Esperando a Magento…»); null al terminar. */
+  onPhase?: (text: string | null) => void;
   signal?: AbortSignal;
   concurrency?: number;
 }
@@ -49,13 +55,124 @@ function tracker(total: number, cb: JobCallbacks) {
 
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
+// ---------------------------------------------------------------------------
+// Modo bulk: las subidas se encolan en Magento y quedan en
+// System > Action Logs > Bulk Actions. Luego se sigue su estado.
+
+export type { QueueSettings, UploadMode };
+
+const PACK_LIMITS = { maxBytes: 3.5 * 1024 * 1024, maxItems: 40 };
+
+interface QueueItem {
+  sku: string;
+  fileName: string;
+  file: File;
+  position: number;
+  types: string[];
+}
+
+type Step = ReturnType<typeof tracker>;
+
+function wait(ms: number, signal?: AbortSignal) {
+  return new Promise<void>((resolve) => {
+    const t = setTimeout(resolve, ms);
+    signal?.addEventListener("abort", () => {
+      clearTimeout(t);
+      resolve();
+    });
+  });
+}
+
+async function enqueueAndTrack(items: QueueItem[], step: Step, cb: JobCallbacks, q: QueueSettings) {
+  if (!items.length) return;
+  const tracking: { uuid: string; items: QueueItem[]; done: Set<number> }[] = [];
+  const packs = packItems(items.map((i) => ({ ...i, size: i.file.size })), PACK_LIMITS);
+
+  let sent = 0;
+  for (const pack of packs) {
+    if (cb.signal?.aborted) break;
+    cb.onPhase?.(`Enviando a la cola de Magento… (${sent}/${items.length})`);
+    try {
+      const res = await withRetry(() => api.enqueueMedia(pack));
+      for (const b of res.bulks) {
+        const slice = pack.slice(b.from, b.from + b.items.length);
+        const accepted: QueueItem[] = [];
+        b.items.forEach((r, i) => {
+          if (r.accepted) accepted.push(slice[i]);
+          else step({ sku: slice[i].sku, action: "subir", fileName: slice[i].fileName, status: "error", message: r.message, bulk: b.bulkUuid });
+        });
+        if (accepted.length) {
+          tracking.push({ uuid: b.bulkUuid, items: accepted, done: new Set() });
+          step({ sku: "—", action: "en cola", status: "ok", message: `${accepted.length} imagen(es) en el bulk ${b.bulkUuid}`, bulk: b.bulkUuid }, false);
+        }
+      }
+    } catch (e) {
+      for (const it of pack) step({ sku: it.sku, action: "subir", fileName: it.fileName, status: "error", message: `No se pudo encolar: ${msg(e)}` });
+    }
+    sent += pack.length;
+  }
+
+  const deadline = Date.now() + q.timeoutMs;
+  let pending = tracking.filter((t) => t.done.size < t.items.length);
+  while (pending.length && !cb.signal?.aborted) {
+    const remaining = pending.reduce((n, t) => n + t.items.length - t.done.size, 0);
+    cb.onPhase?.(`Esperando a que Magento procese ${remaining} imagen(es)…`);
+    for (const t of pending) {
+      try {
+        const st = await api.bulkStatus(t.uuid);
+        st.operations.forEach((op, i) => {
+          if (i >= t.items.length || t.done.has(i) || op.state === "open") return;
+          t.done.add(i);
+          const it = t.items[i];
+          step({
+            sku: it.sku,
+            action: "subir",
+            fileName: it.fileName,
+            status: op.state === "complete" ? "ok" : "error",
+            message: op.state === "complete" ? undefined : op.message || "Magento no pudo procesar la imagen",
+            bulk: t.uuid,
+          });
+        });
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 403) {
+          // Sin permiso para ver Bulk Actions: no se puede seguir, pero la subida sigue en Magento.
+          t.items.forEach((it, i) => {
+            if (t.done.has(i)) return;
+            t.done.add(i);
+            step({ sku: it.sku, action: "subir", fileName: it.fileName, status: "error", bulk: t.uuid, message: "Encolada, pero tu usuario no puede ver su estado (falta el permiso Bulk Actions). Revísalo en el Admin." });
+          });
+        }
+        // Otros errores: se vuelve a intentar en la siguiente vuelta.
+      }
+    }
+    pending = pending.filter((t) => t.done.size < t.items.length);
+    if (!pending.length) break;
+    if (Date.now() > deadline) {
+      for (const t of pending) {
+        t.items.forEach((it, i) => {
+          if (t.done.has(i)) return;
+          step({ sku: it.sku, action: "subir", fileName: it.fileName, status: "error", bulk: t.uuid, message: "Magento aún no la procesó. Revisa que el cron y el consumidor async.operations.all estén activos; el estado está en System > Action Logs > Bulk Actions." });
+        });
+      }
+      break;
+    }
+    await wait(q.pollMs, cb.signal);
+  }
+  if (cb.signal?.aborted && tracking.length) {
+    step({ sku: "—", action: "detenido", status: "ok", message: "Se dejó de seguir el estado. Lo ya encolado se procesará igualmente en Magento (ver Bulk Actions)." }, false);
+  }
+  cb.onPhase?.(null);
+}
+
 export async function runBulkUpload(
   groups: SkuGroup<File>[],
-  opts: { mode: "append" | "replace"; assignRoles: boolean },
+  opts: { mode: "append" | "replace"; assignRoles: boolean; uploadMode?: UploadMode; queue?: QueueSettings },
   cb: JobCallbacks,
 ): Promise<void> {
   const total = groups.reduce((n, g) => n + g.files.length, 0);
   const step = tracker(total, cb);
+  const queued: QueueItem[] = [];
+  const useQueue = opts.uploadMode === "bulk";
 
   await runPool(
     groups,
@@ -95,6 +212,10 @@ export async function runBulkUpload(
         const f = group.files[i];
         try {
           const prepared = await prepareImage(f.file);
+          if (useQueue) {
+            queued.push({ sku, fileName: f.fileName, file: prepared, position: offset + i + 1, types: giveRoles && i === 0 ? MAIN_ROLES : [] });
+            continue;
+          }
           await withRetry(() =>
             api.uploadMedia(sku, prepared, {
               position: offset + i + 1,
@@ -109,6 +230,8 @@ export async function runBulkUpload(
     },
     cb.signal,
   );
+
+  if (useQueue) await enqueueAndTrack(queued, step, cb, opts.queue ?? DEFAULT_QUEUE);
 }
 
 export async function runBulkDelete(
@@ -147,7 +270,13 @@ export interface SharedImage {
  * Anexa las mismas imágenes a varios SKU, cada una en su posición.
  * Las imágenes existentes desde esa posición bajan un puesto (no se borra nada).
  */
-export async function runSharedUpload(skus: string[], images: SharedImage[], cb: JobCallbacks): Promise<void> {
+export async function runSharedUpload(
+  skus: string[],
+  images: SharedImage[],
+  cb: JobCallbacks,
+  opts: { uploadMode?: UploadMode; queue?: QueueSettings } = {},
+): Promise<void> {
+  if (opts.uploadMode === "bulk") return runSharedUploadQueued(skus, images, cb, opts.queue ?? DEFAULT_QUEUE);
   const step = tracker(skus.length, cb);
 
   // Se comprime una sola vez y se reutiliza en todos los SKU.
@@ -199,6 +328,51 @@ export async function runSharedUpload(skus: string[], images: SharedImage[], cb:
   );
 }
 
+/**
+ * Versión con cola: primero corre las imágenes existentes (inmediato) y luego
+ * encola las nuevas en su posición. Progreso por imagen y SKU.
+ */
+async function runSharedUploadQueued(skus: string[], images: SharedImage[], cb: JobCallbacks, q: QueueSettings) {
+  const step = tracker(skus.length * images.length, cb);
+  const failAll = (sku: string, message: string) =>
+    images.forEach((img) => step({ sku, action: "anexar", fileName: img.file.name, status: "error", message }));
+
+  let prepared: File[];
+  try {
+    prepared = await Promise.all(images.map((i) => prepareImage(i.file)));
+  } catch (e) {
+    for (const sku of skus) failAll(sku, `No se pudo preparar la imagen: ${msg(e)}`);
+    return;
+  }
+
+  const queued: QueueItem[] = [];
+  cb.onPhase?.("Preparando las galerías…");
+  await runPool(
+    skus,
+    cb.concurrency ?? 4,
+    async (sku) => {
+      try {
+        const existing = await withRetry(() => api.getMedia(sku));
+        const plan = planInsert(existing, images.map((i) => i.position));
+        const byId = new Map(existing.map((e) => [e.id, e]));
+        // Correr primero las existentes; los roles nuevos se aplican al procesar la cola.
+        for (const mv of plan.moves) {
+          if (cb.signal?.aborted) return;
+          const e = byId.get(mv.id)!;
+          await withRetry(() => api.updateMedia(sku, { id: e.id, label: e.label, disabled: e.disabled, types: e.types, position: mv.position }));
+        }
+        images.forEach((img, i) =>
+          queued.push({ sku, fileName: img.file.name, file: prepared[i], position: plan.newPositions[i], types: img.types }),
+        );
+      } catch (e) {
+        failAll(sku, msg(e));
+      }
+    },
+    cb.signal,
+  );
+  await enqueueAndTrack(queued, step, cb, q);
+}
+
 /** Reemplaza una imagen conservando roles, posición, alt y visibilidad. */
 export async function replaceImage(sku: string, old: MediaEntry, file: File): Promise<void> {
   const prepared = await prepareImage(file);
@@ -213,7 +387,7 @@ export async function replaceImage(sku: string, old: MediaEntry, file: File): Pr
 
 export function logsToCsv(lines: LogLine[]): string {
   const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
-  const rows = [["sku", "accion", "archivo", "estado", "mensaje"], ...lines.map((l) => [l.sku, l.action, l.fileName, l.status, l.message])];
+  const rows = [["sku", "accion", "archivo", "estado", "mensaje", "bulk_uuid"], ...lines.map((l) => [l.sku, l.action, l.fileName, l.status, l.message, l.bulk])];
   return rows.map((r) => r.map(esc).join(",")).join("\n");
 }
 

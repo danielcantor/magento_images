@@ -2,14 +2,15 @@
 import { useEffect, useMemo, useState } from "react";
 import { useDropzone } from "react-dropzone";
 import { api } from "@/lib/api";
-import { runBulkUpload } from "@/lib/bulk";
+import { runBulkUpload, type QueueSettings, type UploadMode } from "@/lib/bulk";
+import QueueNotice from "./QueueNotice";
 import { candidateSkus, matchFiles, parseFileName, type Separator } from "@/lib/skuMatcher";
 import JobProgress from "./JobProgress";
 import { useJob } from "./useJob";
 
 const MAX_FILE_MB = 25;
 
-export default function BulkUploadView() {
+export default function BulkUploadView({ uploadMode = "direct", queue }: { uploadMode?: UploadMode; queue?: QueueSettings }) {
   const [files, setFiles] = useState<File[]>([]);
   const [separator, setSeparator] = useState<Separator>("_");
   const [mode, setMode] = useState<"append" | "replace">("append");
@@ -81,7 +82,7 @@ export default function BulkUploadView() {
     )
       return;
     await job.start(mode === "replace" ? "subida-reemplazar" : "subida-añadir", (cb) =>
-      runBulkUpload(match.groups, { mode, assignRoles }, cb),
+      runBulkUpload(match.groups, { mode, assignRoles, uploadMode, queue }, cb),
     );
   }
 
@@ -93,6 +94,7 @@ export default function BulkUploadView() {
   return (
     <div className="stack">
       <h1>Subida masiva por SKU</h1>
+      {uploadMode === "bulk" && <QueueNotice />}
 
       <div className="card stack">
         <p style={{ margin: 0 }}>
@@ -223,6 +225,7 @@ export default function BulkUploadView() {
         running={job.running}
         cancelled={job.cancelled}
         onCancel={job.cancel}
+        phase={job.phase}
       />
     </div>
   );

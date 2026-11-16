@@ -364,30 +364,70 @@ export async function addMedia(
   return Number(id);
 }
 
-/**
- * Actualiza rol, posición, alt y visibilidad. Importante: NO se envía `file` ni
- * `content`; si se envían, Magento crea una entrada nueva en vez de editarla.
- * Magento quita automáticamente los roles enviados del resto de imágenes.
- */
-export async function updateMedia(
-  sku: string,
-  id: number,
-  input: { label: string | null; position: number; disabled: boolean; types: string[] },
-  store?: string,
-): Promise<void> {
-  await magentoFetch<boolean>(`/products/${enc(sku)}/media/${id}`, {
-    method: "PUT",
-    body: {
-      entry: {
-        id,
-        media_type: "image",
-        label: input.label ?? "",
-        position: input.position,
-        disabled: input.disabled,
-        types: input.types,
+/** Texto genérico con el que Magento envuelve cualquier fallo al guardar el producto. */
+const CANT_SAVE = /can.?t be saved|cannot be saved|could not be saved|could not save/i;
+
+export const PRODUCT_NOT_SAVABLE_MESSAGE =
+  "Magento no puede guardar este producto (suele ser un dato inválido del producto, por ejemplo una URL duplicada o un atributo obligatorio vacío). Abrilo y guardalo desde el Admin de Magento para ver el error exacto.";
+
+type MediaInput = { label: string | null; position: number; disabled: boolean; types: string[] };
+
+function putMedia(sku: string, id: number, input: MediaInput, store?: string, file?: string) {
+  return magentoFetch<boolean>(
+    `/products/${enc(sku)}/media/${id}`,
+    {
+      method: "PUT",
+      body: {
+        entry: {
+          id,
+          media_type: "image",
+          label: input.label ?? "",
+          position: input.position,
+          disabled: input.disabled,
+          types: input.types,
+          ...(file ? { file } : {}),
+        },
       },
     },
-  }, 3, { store });
+    3,
+    { store },
+  );
+}
+
+/**
+ * Actualiza rol, posición, alt y visibilidad. Primero sin `file` (en algunas
+ * versiones de Magento enviarlo duplica la imagen). Si Magento responde «The
+ * product can't be saved», que en otras versiones pasa justamente por faltar
+ * `file`, se reintenta una vez con la ruta actual de la imagen. Si aparece una
+ * copia, se deja la que tiene los valores nuevos y se borra la anterior.
+ */
+export async function updateMedia(sku: string, id: number, input: MediaInput, store?: string): Promise<void> {
+  try {
+    await putMedia(sku, id, input, store);
+    return;
+  } catch (err) {
+    if (!(err instanceof MagentoError) || !CANT_SAVE.test(err.message)) throw err;
+  }
+
+  const before = await getMedia(sku, store);
+  const current = before.find((e) => e.id === id);
+  if (!current) throw new MagentoError("La imagen ya no existe en Magento. Recargá el producto.", 404);
+
+  try {
+    await putMedia(sku, id, input, store, current.file);
+  } catch (err) {
+    if (err instanceof MagentoError && CANT_SAVE.test(err.message)) {
+      throw new MagentoError(PRODUCT_NOT_SAVABLE_MESSAGE, 422);
+    }
+    throw err;
+  }
+
+  const after = await getMedia(sku, store);
+  const beforeIds = new Set(before.map((e) => e.id));
+  const added = after.filter((e) => !beforeIds.has(e.id));
+  if (added.length && after.some((e) => e.id === id)) {
+    await deleteMedia(sku, id);
+  }
 }
 
 export async function deleteMedia(sku: string, id: number): Promise<void> {

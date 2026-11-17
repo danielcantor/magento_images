@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { getAuthMode } from "@/lib/authMode";
 import { MAGENTO_SESSION_COOKIE, openMagentoSession } from "@/lib/session";
 import Nav from "@/components/Nav";
+import { isAuditEnabled } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
 
@@ -14,7 +15,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const missingMagento = !process.env.MAGENTO_BASE_URL || (mode !== "magento" && !process.env.MAGENTO_TOKEN);
   return (
     <>
-      <Nav mode={mode} username={username} />
+      <Nav mode={mode} username={username} auditEnabled={isAuditEnabled()} />
       <main>
         {missingMagento && (
           <div className="alert" style={{ marginBottom: 16 }}>

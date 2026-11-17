@@ -110,6 +110,14 @@ Hay dos consecuencias:
 - **Las tiendas no heredan cambios hechos en el Admin.** Quedan con valores propios iguales a lo general. Si después cambias una imagen a nivel general **desde el Admin**, las tiendas no lo heredan. Los cambios hechos desde el dashboard, en cambio, siempre las vuelven a igualar.
 - **Riesgo según la versión de Magento.** Al guardar en una tienda, Magento guarda el producto en esa tienda. En 2.4 normalmente solo escribe lo que cambia, pero en algunas versiones puede marcar otros atributos (nombre, URL) como propios de la tienda. **Pruébalo primero en staging con un producto** y revisa en el Admin que el nombre y la URL de la tienda sigan con «Use Default Value».
 
+## Historial de acciones
+
+Cada acción queda registrada: Subida masiva, Imagen a varios SKU, borrados masivos, Igualar tiendas y cada guardado, reemplazo, borrado o añadido en el editor. Cada registro guarda el usuario de Magento, la fecha, la duración, los parámetros, los productos y el resultado de cada imagen. El registro se abre al empezar, así que si alguien cierra la pestaña la acción queda como «En curso».
+
+- **Dónde se ve**: en **Historial**. Cada usuario ve solo sus propias acciones. Se puede filtrar por tipo, abrir el detalle y descargarlo en CSV.
+- **Dónde se guarda**: en un almacenamiento privado de **Vercel Blob**, conectado al proyecto. Usa `BLOB_READ_WRITE_TOKEN`, que Vercel crea al conectar el store. Si la variable no existe, el registro se desactiva y el resto funciona igual.
+- **Desarrollo local**: con `AUDIT_LOCAL_DIR=./audit-data` se guarda en disco.
+
 ## 3. (Opcional) Login por usuario con Supabase
 
 Úsalo si varias personas van a usar el dashboard y quieres saber quién hizo cada lote.
@@ -119,7 +127,7 @@ Hay dos consecuencias:
 3. En **Authentication → Users** crea los usuarios (email + contraseña). Desactiva el registro público en **Authentication → Providers → Email** si solo quieres usuarios invitados.
 4. En Vercel añade `NEXT_PUBLIC_SUPABASE_URL` y `NEXT_PUBLIC_SUPABASE_ANON_KEY` (en **Project Settings → API**) y vuelve a desplegar.
 
-Con Supabase configurado, el login pasa a ser por email y aparece la pestaña **Historial**. `DASHBOARD_PASSWORD` deja de usarse.
+Con Supabase configurado, el login pasa a ser por email. `DASHBOARD_PASSWORD` deja de usarse.
 
 ## Desarrollo local
 

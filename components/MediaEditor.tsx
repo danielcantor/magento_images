@@ -17,7 +17,8 @@ import {
   useSortable,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { api, syncAllStores } from "@/lib/api";
+import { api, auditStart, syncAllStores, type AuditFinish } from "@/lib/api";
+import type { AuditKind, AuditLine } from "@/lib/auditKinds";
 import { replaceImage } from "@/lib/bulk";
 import { prepareImage } from "@/lib/imagePrep";
 import type { MediaEntry, MediaRole } from "@/lib/types";
@@ -71,6 +72,7 @@ export default function MediaEditor({ sku, name, syncStoresEnabled = false, expe
           : null,
     );
     setStoreDiffs([]);
+    return r;
   }, [sku]);
 
   useEffect(() => {
@@ -143,28 +145,73 @@ export default function MediaEditor({ sku, name, syncStoresEnabled = false, expe
     });
   }
 
-  async function run(label: string, fn: () => Promise<void>) {
+  /**
+   * Ejecuta una acción del editor, iguala tiendas si corresponde y deja un
+   * registro ya cerrado con el resultado (si el registro está activo).
+   */
+  async function run(label: string, fn: () => Promise<void>, audit: { kind: AuditKind; detail: string; params?: Record<string, unknown> }) {
     setBusy(label);
     setError(null);
+    const lines: AuditLine[] = [];
+    let status: AuditFinish["status"] = "completo";
     try {
       await fn();
+      lines.push({ sku, action: audit.detail, status: "ok" });
       if (syncStoresEnabled) {
         setBusy("Igualando tiendas…");
         try {
-          await syncStoresNow();
+          const r = await syncStoresNow();
+          lines.push({
+            sku,
+            action: "tiendas",
+            status: r.stillDifferent.length ? "error" : "ok",
+            message: r.stillDifferent.length
+              ? `Siguen distintas: ${r.stillDifferent.join(", ")}`
+              : r.storesSynced.length
+                ? `Igualadas: ${r.storesSynced.join(", ")}`
+                : "Ya coincidían",
+          });
         } catch (e) {
+          lines.push({ sku, action: "tiendas", status: "error", message: (e as Error).message });
           setStoreNote(`El cambio se guardó, pero no se pudieron igualar las tiendas: ${(e as Error).message}`);
         }
       }
+      if (lines.some((l) => l.status === "error")) status = "con-errores";
       await load();
       onChanged?.();
     } catch (e) {
+      status = "error";
+      lines.push({ sku, action: audit.detail, status: "error", message: (e as Error).message });
       setError((e as Error).message);
       await load();
     } finally {
       setBusy(null);
+      const ok = lines.filter((l) => l.status === "ok").length;
+      void auditStart(
+        audit.kind,
+        { skus: [sku], params: { producto: name ?? sku, ...audit.params } },
+        { status, ok, failed: lines.length - ok, total: lines.length, lines },
+      );
     }
   }
+
+
+  /** Resumen legible de lo que cambia al guardar (para el registro). */
+  const describeChanges = () => {
+    const orig = new Map(original.map((e) => [e.id, e]));
+    return items
+      .map((e, i) => ({ e, i, o: orig.get(e.id) }))
+      .filter(({ e }) => dirtyIds.has(e.id))
+      .map(({ e, i, o }) => {
+        const parts: string[] = [];
+        if (o && o.position !== i + 1) parts.push(`posición ${o.position}→${i + 1}`);
+        if (o && [...o.types].sort().join() !== [...e.types].sort().join()) parts.push(`roles: ${e.types.join("+") || "ninguno"}`);
+        if (o && (o.label ?? "") !== (e.label ?? "")) parts.push(`alt: «${e.label ?? ""}»`);
+        if (o && o.disabled !== e.disabled) parts.push(e.disabled ? "oculta" : "visible");
+        return `${e.file.split("/").pop()}: ${parts.join(", ")}`;
+      })
+      .join("; ");
+  };
 
   const save = () =>
     run("Guardando…", async () => {
@@ -174,14 +221,27 @@ export default function MediaEditor({ sku, name, syncStoresEnabled = false, expe
         .filter((e) => dirtyIds.has(e.id));
       // Un solo guardado del producto con todos los cambios.
       await api.saveGallery(sku, changed);
+    }, {
+      kind: "editor-guardar",
+      detail: `guardar ${dirtyIds.size} imagen(es)`,
+      params: { cambios: describeChanges() },
     });
 
   const remove = (e: MediaEntry) => {
     if (!confirm(`¿Borrar esta imagen de ${sku}?`)) return;
-    void run("Borrando…", () => api.deleteMedia(sku, e.id).then(() => undefined));
+    void run("Borrando…", () => api.deleteMedia(sku, e.id).then(() => undefined), {
+      kind: "editor-borrar",
+      detail: "borrar imagen",
+      params: { imagen: e.file, posición: e.position, roles: e.types.join(", ") || "ninguno" },
+    });
   };
 
-  const replace = (e: MediaEntry, file: File) => run("Reemplazando…", () => replaceImage(sku, e, file));
+  const replace = (e: MediaEntry, file: File) =>
+    run("Reemplazando…", () => replaceImage(sku, e, file), {
+      kind: "editor-reemplazar",
+      detail: "reemplazar imagen",
+      params: { anterior: e.file, nueva: file.name, posición: e.position, roles: e.types.join(", ") || "ninguno" },
+    });
 
   const addFiles = (files: FileList) =>
     run("Subiendo…", async () => {
@@ -190,6 +250,10 @@ export default function MediaEditor({ sku, name, syncStoresEnabled = false, expe
         const prepared = await prepareImage(f);
         await api.uploadMedia(sku, prepared, { position: ++pos, types: items.length === 0 && pos === 1 ? firstImageRoles : [] });
       }
+    }, {
+      kind: "editor-añadir",
+      detail: `añadir ${files.length} imagen(es)`,
+      params: { archivos: Array.from(files).map((f) => f.name).join(", ") },
     });
 
   const lockedReason = dirty ? "Guardá o descartá los cambios primero" : undefined;
@@ -222,7 +286,7 @@ export default function MediaEditor({ sku, name, syncStoresEnabled = false, expe
                   ))}
                 </ul>
               </div>
-              <button className="primary" disabled={!!busy || dirty} title={dirty ? "Guardá o descartá los cambios primero" : undefined} onClick={() => void run("Igualando tiendas…", async () => {})}>
+              <button className="primary" disabled={!!busy || dirty} title={dirty ? "Guardá o descartá los cambios primero" : undefined} onClick={() => void run("Igualando tiendas…", async () => {}, { kind: "editor-igualar", detail: "igualar tiendas" })}>
                 Igualar todas las tiendas a lo general
               </button>
             </div>

@@ -4,13 +4,13 @@ import { usePathname } from "next/navigation";
 import type { AuthMode } from "@/lib/authMode";
 import { getSupabase } from "@/lib/supabaseBrowser";
 
-export default function Nav({ mode, username }: { mode: AuthMode; username?: string | null }) {
+export default function Nav({ mode, username, auditEnabled = false }: { mode: AuthMode; username?: string | null; auditEnabled?: boolean }) {
   const path = usePathname();
   const links = [
     { href: "/products", label: "Productos" },
     { href: "/bulk", label: "Subida masiva" },
     { href: "/shared", label: "Imagen a varios SKU" },
-    ...(mode === "supabase" ? [{ href: "/history", label: "Historial" }] : []),
+    ...(auditEnabled ? [{ href: "/history", label: "Historial" }] : []),
   ];
 
   async function logout() {

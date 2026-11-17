@@ -130,8 +130,17 @@ export default function SharedUploadView({ uploadMode = "direct", queue, syncSto
   async function start() {
     const desc = images.map((i) => `posición ${i.position}${i.types.length ? ` (${i.types.map(labelOf).join(", ")})` : ""}`).join("; ");
     if (!confirm(`Se anexarán ${images.length} imagen(es) a ${valid.length} producto(s): ${desc}. Las imágenes existentes desde esa posición bajarán un puesto. ¿Continuar?`)) return;
-    await job.start("anexar-varios", (cb) =>
-      runSharedUpload(valid, images.map(({ file, position, types }) => ({ file, position, types })), cb, { uploadMode, queue, syncStores: syncStoresEnabled && syncStores }),
+    await job.start(
+      "varios-sku",
+      (cb) => runSharedUpload(valid, images.map(({ file, position, types }) => ({ file, position, types })), cb, { uploadMode, queue, syncStores: syncStoresEnabled && syncStores }),
+      {
+        skus: valid,
+        params: {
+          imágenes: images.map((i) => `${i.file.name} → posición ${i.position}${i.types.length ? ` (${i.types.map(labelOf).join(", ")})` : ""}`).join("; "),
+          igualarTiendas: syncStoresEnabled && syncStores,
+          cola: uploadMode === "bulk",
+        },
+      },
     );
   }
 

@@ -1,4 +1,5 @@
 // Llamadas desde el navegador a nuestra API (que a su vez habla con Magento).
+import type { AuditLine, AuditRecord, AuditStatus, AuditSummary } from "./auditKinds";
 import type { MediaEntry, MediaRole, ProductSearchResult, Website } from "./types";
 
 export class ApiError extends Error {
@@ -50,6 +51,15 @@ export const api = {
       `/api/media/${enc(sku)}/stores${store ? `?store=${enc(store)}` : ""}`,
       { method: "POST" },
     ),
+
+  auditList: (opts: { cursor?: string; kind?: string } = {}) => {
+    const p = new URLSearchParams();
+    if (opts.cursor) p.set("cursor", opts.cursor);
+    if (opts.kind) p.set("kind", opts.kind);
+    return request<{ enabled: boolean; items: AuditSummary[]; cursor?: string }>(`/api/audit?${p}`);
+  },
+
+  auditGet: (id: string) => request<AuditRecord>(`/api/audit/${enc(id)}`),
 
   roles: () => request<{ roles: MediaRole[]; firstImageRoles: string[] }>("/api/roles"),
 
@@ -158,4 +168,49 @@ export async function syncAllStores(sku: string): Promise<{ storesSynced: string
     total.stillDifferent.push(...r.stillDifferent);
   }
   return total;
+}
+
+// ---------------------------------------------------------------------------
+// Registro de acciones. Nunca interrumpe la acción: si falla, solo se avisa en consola.
+
+export interface AuditFinish {
+  status: AuditStatus;
+  ok?: number;
+  failed?: number;
+  total?: number;
+  lines?: AuditLine[];
+}
+
+export async function auditStart(
+  kind: string,
+  meta: { params?: Record<string, unknown>; skus?: string[]; total?: number } = {},
+  finish?: AuditFinish,
+): Promise<string | null> {
+  try {
+    const res = await fetch("/api/audit", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ kind, ...meta, finish }),
+    });
+    if (!res.ok) return null;
+    const body = (await res.json()) as { enabled?: boolean; id?: string };
+    return body.enabled && body.id ? body.id : null;
+  } catch (e) {
+    console.warn("No se pudo registrar la acción", e);
+    return null;
+  }
+}
+
+export async function auditFinish(id: string | null, finish: AuditFinish): Promise<void> {
+  if (!id) return;
+  try {
+    await fetch(`/api/audit/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(finish),
+      keepalive: true,
+    });
+  } catch (e) {
+    console.warn("No se pudo cerrar el registro de la acción", e);
+  }
 }

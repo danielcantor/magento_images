@@ -85,8 +85,21 @@ export default function BulkUploadView({ uploadMode = "direct", queue, syncStore
       !confirm(`Modo REEMPLAZAR: se borrarán todas las imágenes actuales de ${match.groups.length} producto(s) antes de subir las nuevas. ¿Continuar?`)
     )
       return;
-    await job.start(mode === "replace" ? "subida-reemplazar" : "subida-añadir", (cb) =>
-      runBulkUpload(match.groups, { mode, assignRoles, firstImageRoles, uploadMode, queue, syncStores: syncStoresEnabled && syncStores }, cb),
+    await job.start(
+      mode === "replace" ? "subida-reemplazar" : "subida-masiva",
+      (cb) => runBulkUpload(match.groups, { mode, assignRoles, firstImageRoles, uploadMode, queue, syncStores: syncStoresEnabled && syncStores }, cb),
+      {
+        skus: match.groups.map((g) => g.sku),
+        params: {
+          modo: mode === "replace" ? "reemplazar galería" : "añadir",
+          separador: separator,
+          imágenes: imageCount,
+          rechazadas: match.rejected.length,
+          rolesPrimeraImagen: assignRoles ? firstImageRoles.map(labelOf).join(", ") : "no",
+          igualarTiendas: syncStoresEnabled && syncStores,
+          cola: uploadMode === "bulk",
+        },
+      },
     );
   }
 

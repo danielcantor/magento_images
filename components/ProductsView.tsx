@@ -156,8 +156,10 @@ export default function ProductsView({ syncStoresEnabled = false }: { syncStores
     const skus = [...selected];
     const what = onlyWithoutRoles ? "las imágenes SIN rol (ni base, ni small, ni thumbnail)" : "TODAS las imágenes";
     if (!confirm(`Vas a borrar ${what} de ${skus.length} producto(s). Esta acción no se puede deshacer. ¿Continuar?`)) return;
-    await job.start(onlyWithoutRoles ? "borrar-sin-rol" : "borrar-todas", (cb) =>
-      runBulkDelete(skus, { onlyWithoutRoles, syncStores: syncStoresEnabled }, cb),
+    await job.start(
+      onlyWithoutRoles ? "borrar-sin-rol" : "borrar-todas",
+      (cb) => runBulkDelete(skus, { onlyWithoutRoles, syncStores: syncStoresEnabled }, cb),
+      { skus, params: { igualarTiendas: syncStoresEnabled } },
     );
     setSelected(new Set());
     void load();
@@ -166,7 +168,7 @@ export default function ProductsView({ syncStoresEnabled = false }: { syncStores
   async function bulkSyncStores() {
     const skus = [...selected];
     if (!confirm(`Se copiarán los roles, alt, posición y «ocultar» generales en todas las tiendas de ${skus.length} producto(s). ¿Continuar?`)) return;
-    await job.start("igualar-tiendas", (cb) => runStoreSync(skus, cb));
+    await job.start("igualar-tiendas", (cb) => runStoreSync(skus, cb), { skus });
     setSelected(new Set());
     void load();
   }

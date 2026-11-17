@@ -446,6 +446,61 @@ export function buildGallery(raw: RawEntry[], changes: GalleryChange[]): RawEntr
  * (incluidos videos), porque las que faltan Magento las borra. Siempre en el
  * store general, para no copiar atributos a una tienda.
  */
+const LINKS_INVALID = /linked products data is invalid/i;
+
+const LINK_TYPE_LABELS: Record<string, string> = { related: "relacionados", upsell: "up-sell", crosssell: "cross-sell" };
+const linkTypeLabel = (t: string) => LINK_TYPE_LABELS[t] ?? `tipo «${t}»`;
+
+interface ProductLink {
+  link_type: string;
+  linked_product_sku: string;
+}
+
+/**
+ * Explica un rechazo de Magento al guardar el producto. Al guardar, Magento vuelve
+ * a grabar todos sus productos vinculados y, si alguno falla, rechaza el guardado
+ * entero («The linked products data is invalid» o «The product can't be saved»).
+ * Solo lee: no cambia nada. Si no puede averiguar más, devuelve null.
+ */
+export async function explainSaveFailure(sku: string, magentoMessage: string): Promise<string | null> {
+  if (!LINKS_INVALID.test(magentoMessage) && !CANT_SAVE.test(magentoMessage)) return null;
+  let links: ProductLink[];
+  try {
+    const product = await magentoFetch<{ product_links?: ProductLink[] | null }>(
+      `/products/${enc(sku)}?fields=sku,product_links`,
+      {},
+      1,
+      { store: "all" },
+    );
+    links = (product.product_links ?? []).filter((l) => l && l.linked_product_sku);
+  } catch {
+    return null;
+  }
+  if (!links.length) return null;
+
+  // Si no se pudo comprobar qué SKU existen, no se marca ninguno como faltante.
+  const found = await findExistingSkus(links.map((l) => l.linked_product_sku)).catch(() => null);
+  const checked = found !== null;
+  const existing = new Set((found ?? []).map((s) => s.toLowerCase()));
+  const byType = new Map<string, { all: number; missing: string[] }>();
+  for (const l of links) {
+    const g = byType.get(l.link_type) ?? { all: 0, missing: [] };
+    g.all++;
+    if (checked && !existing.has(l.linked_product_sku.toLowerCase())) g.missing.push(l.linked_product_sku);
+    byType.set(l.link_type, g);
+  }
+  const fix = "Revisalos en el Admin (Productos relacionados, Up-sells y Cross-sells), guardá el producto y volvé a intentar.";
+  const missing = [...byType].filter(([, g]) => g.missing.length);
+  if (missing.length) {
+    const list = missing
+      .map(([t, g]) => `${linkTypeLabel(t)}: ${g.missing.slice(0, 5).join(", ")}${g.missing.length > 5 ? ` y ${g.missing.length - 5} más` : ""}`)
+      .join("; ");
+    return `Magento no puede guardar este producto porque tiene productos vinculados que ya no existen (${list}). ${fix}`;
+  }
+  const counts = [...byType].map(([t, g]) => `${linkTypeLabel(t)}: ${g.all}`).join("; ");
+  return `Magento no puede volver a grabar los productos vinculados de este producto (${counts}). ${fix}`;
+}
+
 export async function saveGallery(sku: string, changes: GalleryChange[]): Promise<void> {
   if (!changes.length) return;
   const raw = await magentoFetch<RawEntry[]>(`/products/${enc(sku)}/media`, {}, 3, { store: "all" });
@@ -461,8 +516,9 @@ export async function saveGallery(sku: string, changes: GalleryChange[]): Promis
     );
   } catch (err) {
     if (err instanceof MagentoError && err.status >= 400 && err.status < 500 && err.status !== 401 && err.status !== 403) {
+      const explained = await explainSaveFailure(sku, err.message);
       throw new MagentoError(
-        CANT_SAVE.test(err.message) ? PRODUCT_NOT_SAVABLE_MESSAGE : `Magento no puede guardar este producto: ${err.message}`,
+        explained ?? (CANT_SAVE.test(err.message) ? PRODUCT_NOT_SAVABLE_MESSAGE : `Magento no puede guardar este producto: ${err.message}`),
         422,
       );
     }
@@ -484,7 +540,7 @@ export async function updateMedia(sku: string, id: number, input: MediaInput, st
   } catch (err) {
     if (!(err instanceof MagentoError) || !CANT_SAVE.test(err.message)) throw err;
     if (store && store !== "all" && store !== getConfig().storeCode) {
-      throw new MagentoError(PRODUCT_NOT_SAVABLE_MESSAGE, 422);
+      throw new MagentoError((await explainSaveFailure(sku, err.message)) ?? PRODUCT_NOT_SAVABLE_MESSAGE, 422);
     }
   }
   await saveGallery(sku, [{ id, ...input }]);

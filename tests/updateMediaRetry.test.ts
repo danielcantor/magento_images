@@ -81,14 +81,63 @@ describe("updateMedia", () => {
   });
 
   it("en una store view no hay alternativa: 422 claro", async () => {
-    fetchMock.mockResolvedValueOnce(cantSave());
+    fetchMock.mockResolvedValueOnce(cantSave()).mockResolvedValueOnce(json({ product_links: [] }));
     await expect(updateMedia("S1", 7, input, "en")).rejects.toMatchObject({ status: 422, message: PRODUCT_NOT_SAVABLE_MESSAGE });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(calls()).toEqual(["PUT /rest/en/V1/products/S1/media/7", "GET /rest/all/V1/products/S1"]);
   });
 
   it("otros errores no cambian de camino", async () => {
     fetchMock.mockResolvedValueOnce(json({ message: "No image with the provided ID was found." }, 404));
     await expect(updateMedia("S1", 7, input)).rejects.toMatchObject({ status: 404 });
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("diagnóstico de productos vinculados", () => {
+  const linksInvalid = () => json({ message: "The linked products data is invalid. Verify the data and try again." }, 400);
+  const links = [
+    { sku: "S1", link_type: "related", linked_product_sku: "OK-1" },
+    { sku: "S1", link_type: "related", linked_product_sku: "GONE-1" },
+    { sku: "S1", link_type: "crosssell", linked_product_sku: "GONE-2" },
+  ];
+
+  it("nombra los vinculados que ya no existen, por tipo", async () => {
+    fetchMock
+      .mockResolvedValueOnce(json([img(1, 1)]))
+      .mockResolvedValueOnce(linksInvalid())
+      .mockResolvedValueOnce(json({ sku: "S1", product_links: links }))
+      .mockResolvedValueOnce(json({ items: [{ sku: "OK-1" }] }));
+    const err = await saveGallery("S1", [{ id: 1, position: 2 }]).catch((e) => e);
+    expect(err.status).toBe(422);
+    expect(err.message).toContain("ya no existen (relacionados: GONE-1; cross-sell: GONE-2)");
+    expect(calls().slice(2)).toEqual(["GET /rest/all/V1/products/S1", "GET /rest/all/V1/products"]);
+    // Solo lecturas después del rechazo: no se reintenta ni se tocan los vínculos.
+    expect(fetchMock.mock.calls.slice(2).every(([, i]) => (i?.method ?? "GET") === "GET")).toBe(true);
+  });
+
+  it("si todos existen, cuenta los vínculos por tipo", async () => {
+    fetchMock
+      .mockResolvedValueOnce(json([img(1, 1)]))
+      .mockResolvedValueOnce(linksInvalid())
+      .mockResolvedValueOnce(json({ product_links: [{ link_type: "upsell", linked_product_sku: "A" }, { link_type: "ias", linked_product_sku: "B" }] }))
+      .mockResolvedValueOnce(json({ items: [{ sku: "A" }, { sku: "B" }] }));
+    const err = await saveGallery("S1", [{ id: 1, position: 2 }]).catch((e) => e);
+    expect(err.message).toContain("(up-sell: 1; tipo «ias»: 1)");
+  });
+
+  it("si no puede leer el producto, deja el mensaje de Magento", async () => {
+    fetchMock.mockResolvedValueOnce(json([img(1, 1)])).mockResolvedValueOnce(linksInvalid()).mockResolvedValueOnce(json({ message: "x" }, 404));
+    const err = await saveGallery("S1", [{ id: 1, position: 2 }]).catch((e) => e);
+    expect(err.message).toBe("Magento no puede guardar este producto: The linked products data is invalid. Verify the data and try again.");
+  });
+
+  it("si no puede comprobar los SKU, no marca ninguno como faltante", async () => {
+    fetchMock
+      .mockResolvedValueOnce(json([img(1, 1)]))
+      .mockResolvedValueOnce(cantSave())
+      .mockResolvedValueOnce(json({ product_links: links }))
+      .mockResolvedValueOnce(json({ message: "boom" }, 400));
+    const err = await saveGallery("S1", [{ id: 1, position: 2 }]).catch((e) => e);
+    expect(err.message).toContain("no puede volver a grabar los productos vinculados de este producto (relacionados: 2; cross-sell: 1)");
   });
 });

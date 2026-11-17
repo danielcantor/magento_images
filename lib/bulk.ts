@@ -2,6 +2,7 @@
 // Trabajos masivos que corren en el navegador. Cada SKU se procesa en serie
 // (para no pisar la galería del mismo producto) y varios SKU en paralelo.
 import { api, ApiError, syncAllStores, withRetry } from "./api";
+import { formatLinkCounts, formatMissingLinks } from "./linkLabels";
 import { packItems } from "./packing";
 import { DEFAULT_QUEUE, type QueueSettings, type UploadMode } from "./queueSettings";
 import { prepareImage } from "./imagePrep";
@@ -476,6 +477,62 @@ export async function runStoreSync(skus: string[], cb: JobCallbacks): Promise<vo
         );
       } catch (e) {
         step({ sku, action: "igualar tiendas", status: "error", message: msg(e) });
+      }
+    },
+    cb.signal,
+  );
+}
+
+/** Revisa los productos vinculados (solo lectura), de a 20 productos por petición. */
+export async function runLinkCheck(skus: string[], cb: JobCallbacks): Promise<void> {
+  const step = tracker(skus.length, cb);
+  const chunks: string[][] = [];
+  for (let i = 0; i < skus.length; i += 20) chunks.push(skus.slice(i, i + 20));
+  await runPool(
+    chunks,
+    cb.concurrency ?? 2,
+    async (chunk) => {
+      try {
+        const results = await withRetry(() => api.checkLinks(chunk));
+        for (const r of results) {
+          if ("error" in r) step({ sku: r.sku, action: "revisar vínculos", status: "error", message: r.error });
+          else if (!r.checked) step({ sku: r.sku, action: "revisar vínculos", status: "error", message: "No se pudo comprobar qué productos vinculados existen" });
+          else if (r.missing.length)
+            step({ sku: r.sku, action: "revisar vínculos", status: "error", message: `Vínculos a SKU que no existen: ${formatMissingLinks(r.missing)}` });
+          else
+            step({
+              sku: r.sku,
+              action: "revisar vínculos",
+              status: "ok",
+              message: Object.keys(r.byType).length ? `Bien (${formatLinkCounts(r.byType)})` : "Sin productos vinculados",
+            });
+        }
+      } catch (e) {
+        chunk.forEach((sku) => step({ sku, action: "revisar vínculos", status: "error", message: msg(e) }));
+      }
+    },
+    cb.signal,
+  );
+}
+
+export function describeRepair(r: { kept: number; removed: { type: string; sku: string }[] }): string {
+  return r.removed.length
+    ? `Se quitaron ${r.removed.length} vínculo(s) a SKU que no existen (${formatMissingLinks(r.removed)}); quedan ${r.kept}`
+    : `Producto guardado con sus ${r.kept} vínculo(s); no había vínculos a SKU inexistentes`;
+}
+
+/** Guarda cada producto con sus vínculos válidos (quita los que apuntan a SKU borrados). */
+export async function runLinkRepair(skus: string[], cb: JobCallbacks): Promise<void> {
+  const step = tracker(skus.length, cb);
+  await runPool(
+    skus,
+    cb.concurrency ?? 2,
+    async (sku) => {
+      try {
+        const r = await api.repairLinks(sku);
+        step({ sku, action: "reparar vínculos", status: "ok", message: describeRepair(r) });
+      } catch (e) {
+        step({ sku, action: "reparar vínculos", status: "error", message: msg(e) });
       }
     },
     cb.signal,

@@ -11,6 +11,8 @@ export const AUDIT_KINDS = {
   "editor-borrar": "Editor: borrar imagen",
   "editor-añadir": "Editor: añadir imágenes",
   "editor-igualar": "Editor: igualar tiendas",
+  "revisar-vinculos": "Revisar productos vinculados",
+  "reparar-vinculos": "Reparar productos vinculados",
 } as const;
 
 export type AuditKind = keyof typeof AUDIT_KINDS;

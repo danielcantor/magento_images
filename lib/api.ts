@@ -2,6 +2,10 @@
 import type { AuditLine, AuditRecord, AuditStatus, AuditSummary } from "./auditKinds";
 import type { MediaEntry, MediaRole, ProductSearchResult, Website } from "./types";
 
+export type LinkCheckResult =
+  | { sku: string; byType: Record<string, number>; missing: { type: string; sku: string }[]; checked: boolean }
+  | { sku: string; error: string };
+
 export class ApiError extends Error {
   constructor(message: string, public status: number) {
     super(message);
@@ -51,6 +55,20 @@ export const api = {
       `/api/media/${enc(sku)}/stores${store ? `?store=${enc(store)}` : ""}`,
       { method: "POST" },
     ),
+
+  checkLinks: (skus: string[]) =>
+    request<{ results: LinkCheckResult[] }>("/api/links/check", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ skus }),
+    }).then((r) => r.results),
+
+  repairLinks: (sku: string) =>
+    request<{ kept: number; removed: { type: string; sku: string }[] }>("/api/links/repair", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sku }),
+    }),
 
   auditList: (opts: { cursor?: string; kind?: string } = {}) => {
     const p = new URLSearchParams();

@@ -19,7 +19,7 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { api, auditStart, syncAllStores, type AuditFinish } from "@/lib/api";
 import type { AuditKind, AuditLine } from "@/lib/auditKinds";
-import { replaceImage } from "@/lib/bulk";
+import { describeRepair, replaceImage } from "@/lib/bulk";
 import { prepareImage } from "@/lib/imagePrep";
 import type { MediaEntry, MediaRole } from "@/lib/types";
 import { useRoles } from "./useRoles";
@@ -182,8 +182,9 @@ export default function MediaEditor({ sku, name, syncStoresEnabled = false, expe
     } catch (e) {
       status = "error";
       lines.push({ sku, action: audit.detail, status: "error", message: (e as Error).message });
-      setError((e as Error).message);
+      // Recargar primero: load() limpia el error y lo borraría antes de que se vea.
       await load();
+      setError((e as Error).message);
     } finally {
       setBusy(null);
       const ok = lines.filter((l) => l.status === "ok").length;
@@ -195,6 +196,35 @@ export default function MediaEditor({ sku, name, syncStoresEnabled = false, expe
     }
   }
 
+
+  /** Guarda el producto con sus vínculos válidos y deja constancia en el Historial. */
+  async function repairLinks() {
+    if (
+      !confirm(
+        "Se guardará el producto con sus productos vinculados válidos, como al guardar desde el Admin. " +
+          "Se quitan los vínculos a SKU que ya no existen; el resto del producto no cambia. ¿Continuar?",
+      )
+    )
+      return;
+    setBusy("Reparando vínculos…");
+    let line: AuditLine;
+    try {
+      const r = await api.repairLinks(sku);
+      line = { sku, action: "reparar vínculos", status: "ok", message: describeRepair(r) };
+      setError(null);
+      setStoreNote(`${describeRepair(r)}. Ya podés volver a intentar el cambio.`);
+    } catch (e) {
+      line = { sku, action: "reparar vínculos", status: "error", message: (e as Error).message };
+      setError((e as Error).message);
+    } finally {
+      setBusy(null);
+    }
+    void auditStart(
+      "reparar-vinculos",
+      { skus: [sku], params: { producto: name ?? sku } },
+      { status: line.status === "ok" ? "completo" : "error", ok: line.status === "ok" ? 1 : 0, failed: line.status === "ok" ? 0 : 1, total: 1, lines: [line] },
+    );
+  }
 
   /** Resumen legible de lo que cambia al guardar (para el registro). */
   const describeChanges = () => {
@@ -273,7 +303,18 @@ export default function MediaEditor({ sku, name, syncStoresEnabled = false, expe
           </button>
         </header>
         <div className="body stack">
-          {error && <div className="alert">{error}</div>}
+          {error && (
+            <div className="alert">
+              {error}
+              {/vinculados/i.test(error) && (
+                <div style={{ marginTop: 8 }}>
+                  <button onClick={repairLinks} disabled={!!busy}>
+                    Reparar vínculos
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
           {storeDiffs && storeDiffs.length > 0 && (
             <div className="alert warn-box">
               <div>

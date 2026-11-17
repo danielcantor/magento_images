@@ -110,6 +110,13 @@ Hay dos consecuencias:
 - **Las tiendas no heredan cambios hechos en el Admin.** Quedan con valores propios iguales a lo general. Si después cambias una imagen a nivel general **desde el Admin**, las tiendas no lo heredan. Los cambios hechos desde el dashboard, en cambio, siempre las vuelven a igualar.
 - **Riesgo según la versión de Magento.** Al guardar en una tienda, Magento guarda el producto en esa tienda. En 2.4 normalmente solo escribe lo que cambia, pero en algunas versiones puede marcar otros atributos (nombre, URL) como propios de la tienda. **Pruébalo primero en staging con un producto** y revisa en el Admin que el nombre y la URL de la tienda sigan con «Use Default Value».
 
+## Productos vinculados rotos
+
+Al guardar un producto por la API, Magento vuelve a grabar todos sus productos vinculados (relacionados, up-sell, cross-sell). Si uno falla, rechaza todo el guardado con «The linked products data is invalid» o «The product can't be saved», aunque la imagen esté bien.
+
+- **Revisar vínculos** (Productos → seleccionar → acción masiva): solo lee e indica qué productos tienen vínculos a SKU que ya no existen.
+- **Reparar vínculos** (acción masiva, o el botón que aparece en el error del editor): vuelve a guardar el producto con los vínculos válidos, como hace el Admin. Quita solo los que apuntan a SKU inexistentes y queda en el Historial.
+
 ## Historial de acciones
 
 Cada acción queda registrada: Subida masiva, Imagen a varios SKU, borrados masivos, Igualar tiendas y cada guardado, reemplazo, borrado o añadido en el editor. Cada registro guarda el usuario de Magento, la fecha, la duración, los parámetros, los productos y el resultado de cada imagen. El registro se abre al empezar, así que si alguien cierra la pestaña la acción queda como «En curso».

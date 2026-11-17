@@ -1,6 +1,7 @@
 // Cliente de la REST API de Magento 2. Solo se usa en el servidor:
 // el token nunca llega al navegador.
 import "server-only";
+import { formatLinkCounts, formatMissingLinks } from "./linkLabels";
 import { getAuthMode } from "./authMode";
 import { diffEntries, planStoreUpdates, type StoreDiff } from "./storeSync";
 import { getRequestToken } from "./requestToken";
@@ -448,12 +449,64 @@ export function buildGallery(raw: RawEntry[], changes: GalleryChange[]): RawEntr
  */
 const LINKS_INVALID = /linked products data is invalid/i;
 
-const LINK_TYPE_LABELS: Record<string, string> = { related: "relacionados", upsell: "up-sell", crosssell: "cross-sell" };
-const linkTypeLabel = (t: string) => LINK_TYPE_LABELS[t] ?? `tipo «${t}»`;
 
-interface ProductLink {
+/** Vínculo tal como lo devuelve Magento (se reenvía igual al reparar). */
+export interface ProductLink {
+  sku?: string;
   link_type: string;
   linked_product_sku: string;
+  [key: string]: unknown;
+}
+
+export interface LinkCheck {
+  sku: string;
+  /** Vínculos por tipo (related, upsell, crosssell u otros de módulos). */
+  byType: Record<string, number>;
+  /** Vínculos que apuntan a SKU que ya no existen. */
+  missing: { type: string; sku: string }[];
+  /** false si no se pudo comprobar qué SKU existen (entonces `missing` queda vacío). */
+  checked: boolean;
+}
+
+async function readProductLinks(sku: string): Promise<ProductLink[]> {
+  const product = await magentoFetch<{ product_links?: ProductLink[] | null }>(
+    `/products/${enc(sku)}?fields=sku,product_links`,
+    {},
+    3,
+    { store: "all" },
+  );
+  return (product.product_links ?? []).filter((l) => l && l.linked_product_sku);
+}
+
+/** Clasifica los vínculos de cada producto; `existing` = SKU vinculados que existen (null = no se pudo comprobar). */
+function analyzeLinks(sku: string, links: ProductLink[], existing: Set<string> | null): LinkCheck {
+  const byType: Record<string, number> = {};
+  const missing: LinkCheck["missing"] = [];
+  for (const l of links) {
+    byType[l.link_type] = (byType[l.link_type] ?? 0) + 1;
+    if (existing && !existing.has(l.linked_product_sku.toLowerCase())) missing.push({ type: l.link_type, sku: l.linked_product_sku });
+  }
+  return { sku, byType, missing, checked: existing !== null };
+}
+
+async function existingSet(skus: string[]): Promise<Set<string> | null> {
+  if (!skus.length) return new Set();
+  const found = await findExistingSkus(skus).catch(() => null);
+  return found ? new Set(found.map((s) => s.toLowerCase())) : null;
+}
+
+/** Revisa los vínculos de varios productos (solo lectura). */
+export async function checkProductLinks(skus: string[]): Promise<(LinkCheck | { sku: string; error: string })[]> {
+  type Read = { sku: string; links: ProductLink[] } | { sku: string; error: string };
+  const read = await mapLimit(skus, 3, async (sku): Promise<Read> => {
+    try {
+      return { sku, links: await readProductLinks(sku) };
+    } catch (e) {
+      return { sku, error: e instanceof Error ? e.message : String(e) };
+    }
+  });
+  const existing = await existingSet(read.flatMap((r) => ("links" in r ? r.links.map((l) => l.linked_product_sku) : [])));
+  return read.map((r) => ("links" in r ? analyzeLinks(r.sku, r.links, existing) : r));
 }
 
 /**
@@ -466,39 +519,52 @@ export async function explainSaveFailure(sku: string, magentoMessage: string): P
   if (!LINKS_INVALID.test(magentoMessage) && !CANT_SAVE.test(magentoMessage)) return null;
   let links: ProductLink[];
   try {
-    const product = await magentoFetch<{ product_links?: ProductLink[] | null }>(
-      `/products/${enc(sku)}?fields=sku,product_links`,
-      {},
-      1,
-      { store: "all" },
-    );
-    links = (product.product_links ?? []).filter((l) => l && l.linked_product_sku);
+    links = await readProductLinks(sku);
   } catch {
     return null;
   }
   if (!links.length) return null;
+  const check = analyzeLinks(sku, links, await existingSet(links.map((l) => l.linked_product_sku)));
+  const fix = "Usá «Reparar vínculos» o revisalos en el Admin (Productos relacionados, Up-sells y Cross-sells), guardá el producto y volvé a intentar.";
+  if (check.missing.length) {
+    return `Magento no puede guardar este producto porque tiene productos vinculados que ya no existen (${formatMissingLinks(check.missing)}). ${fix}`;
+  }
+  return `Magento no puede volver a grabar los productos vinculados de este producto (${formatLinkCounts(check.byType)}). ${fix}`;
+}
 
-  // Si no se pudo comprobar qué SKU existen, no se marca ninguno como faltante.
-  const found = await findExistingSkus(links.map((l) => l.linked_product_sku)).catch(() => null);
-  const checked = found !== null;
-  const existing = new Set((found ?? []).map((s) => s.toLowerCase()));
-  const byType = new Map<string, { all: number; missing: string[] }>();
-  for (const l of links) {
-    const g = byType.get(l.link_type) ?? { all: 0, missing: [] };
-    g.all++;
-    if (checked && !existing.has(l.linked_product_sku.toLowerCase())) g.missing.push(l.linked_product_sku);
-    byType.set(l.link_type, g);
+export interface LinkRepairResult {
+  kept: number;
+  removed: LinkCheck["missing"];
+}
+
+/**
+ * Vuelve a guardar el producto con sus vínculos válidos, como hace el Admin al
+ * guardar: se reenvían los vínculos que existen y se quitan los que apuntan a SKU
+ * borrados. No toca nada más del producto.
+ */
+export async function repairProductLinks(sku: string): Promise<LinkRepairResult> {
+  const links = await readProductLinks(sku);
+  const existing = await existingSet(links.map((l) => l.linked_product_sku));
+  if (existing === null) throw new MagentoError("No se pudo comprobar qué productos vinculados existen. Probá de nuevo.", 502);
+  const valid = links.filter((l) => existing.has(l.linked_product_sku.toLowerCase()));
+  const removed = analyzeLinks(sku, links, existing).missing;
+  try {
+    await magentoFetch(
+      `/products/${enc(sku)}`,
+      { method: "PUT", body: { product: { sku, product_links: valid } } },
+      1,
+      { store: "all", timeoutMs: 120_000 },
+    );
+  } catch (err) {
+    if (err instanceof MagentoError && err.status >= 400 && err.status < 500 && err.status !== 401 && err.status !== 403) {
+      throw new MagentoError(
+        `Magento tampoco pudo guardar el producto con los vínculos válidos (${err.message}). Revisalo en el Admin o consultá a quien mantiene Magento.`,
+        422,
+      );
+    }
+    throw err;
   }
-  const fix = "Revisalos en el Admin (Productos relacionados, Up-sells y Cross-sells), guardá el producto y volvé a intentar.";
-  const missing = [...byType].filter(([, g]) => g.missing.length);
-  if (missing.length) {
-    const list = missing
-      .map(([t, g]) => `${linkTypeLabel(t)}: ${g.missing.slice(0, 5).join(", ")}${g.missing.length > 5 ? ` y ${g.missing.length - 5} más` : ""}`)
-      .join("; ");
-    return `Magento no puede guardar este producto porque tiene productos vinculados que ya no existen (${list}). ${fix}`;
-  }
-  const counts = [...byType].map(([t, g]) => `${linkTypeLabel(t)}: ${g.all}`).join("; ");
-  return `Magento no puede volver a grabar los productos vinculados de este producto (${counts}). ${fix}`;
+  return { kept: valid.length, removed };
 }
 
 export async function saveGallery(sku: string, changes: GalleryChange[]): Promise<void> {

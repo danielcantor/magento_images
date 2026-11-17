@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { SHARED_SKUS_KEY } from "@/lib/skuList";
 import { api } from "@/lib/api";
-import { runBulkDelete, runStoreSync } from "@/lib/bulk";
+import { runBulkDelete, runLinkCheck, runLinkRepair, runStoreSync } from "@/lib/bulk";
 import { PAGE_SIZES, type ProductRow, type Website } from "@/lib/types";
 import MediaEditor from "./MediaEditor";
 import { SkeletonRows } from "./Skeleton";
@@ -173,6 +173,23 @@ export default function ProductsView({ syncStoresEnabled = false }: { syncStores
     void load();
   }
 
+  async function bulkCheckLinks() {
+    const skus = [...selected];
+    await job.start("revisar-vinculos", (cb) => runLinkCheck(skus, cb), { skus });
+  }
+
+  async function bulkRepairLinks() {
+    const skus = [...selected];
+    if (
+      !confirm(
+        `Se guardarán ${skus.length} producto(s) con sus productos vinculados válidos, como al guardar desde el Admin. ` +
+          "Se quitan los vínculos a SKU que ya no existen; el resto del producto no cambia. ¿Continuar?",
+      )
+    )
+      return;
+    await job.start("reparar-vinculos", (cb) => runLinkRepair(skus, cb), { skus });
+  }
+
   return (
     <div className="stack">
       <h1 style={{ margin: 0 }}>Productos</h1>
@@ -336,6 +353,12 @@ export default function ProductsView({ syncStoresEnabled = false }: { syncStores
               Igualar tiendas
             </button>
           )}
+          <button onClick={bulkCheckLinks} disabled={job.running} title="Busca productos vinculados que apuntan a SKU que ya no existen (no cambia nada)">
+            Revisar vínculos
+          </button>
+          <button onClick={bulkRepairLinks} disabled={job.running} title="Guarda el producto quitando los vínculos a SKU que ya no existen">
+            Reparar vínculos
+          </button>
           <button onClick={() => bulkDelete(true)} disabled={job.running}>
             Borrar imágenes sin rol
           </button>

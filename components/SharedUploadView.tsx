@@ -8,6 +8,7 @@ import SyncStoresOption from "./SyncStoresOption";
 import { parseSkuCsv, parseSkuText, SHARED_SKUS_KEY } from "@/lib/skuList";
 import { useRoles } from "./useRoles";
 import JobProgress from "./JobProgress";
+import UploadErrorHelp from "./UploadErrorHelp";
 import { useJob } from "./useJob";
 
 
@@ -31,6 +32,7 @@ export default function SharedUploadView({ uploadMode = "direct", queue, syncSto
   const [images, setImages] = useState<Img[]>([]);
   const csvInput = useRef<HTMLInputElement>(null);
   const job = useJob();
+  const hasErrors = !job.running && (job.progress?.failed ?? 0) > 0;
   const [syncStores, setSyncStores] = useState(true);
   const { roles, labelOf } = useRoles();
 
@@ -296,6 +298,8 @@ export default function SharedUploadView({ uploadMode = "direct", queue, syncSto
         onCancel={job.cancel}
         phase={job.phase}
       />
+
+      <UploadErrorHelp key={hasErrors ? "errores" : "ok"} open={hasErrors} bulk={uploadMode === "bulk"} />
     </div>
   );
 }

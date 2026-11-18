@@ -58,6 +58,6 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
-  // Todo excepto login, endpoints de login y archivos estáticos.
-  matcher: ["/((?!login|api/auth|brand/|icon.svg|_next/static|_next/image|favicon.ico).*)"],
+  // Todo excepto login, endpoints de login, el contador público de la tienda y archivos estáticos.
+  matcher: ["/((?!login|api/auth|api/public/|stock-widget.js|brand/|icon.svg|_next/static|_next/image|favicon.ico).*)"],
 };

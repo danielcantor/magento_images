@@ -1,6 +1,18 @@
 // Llamadas desde el navegador a nuestra API (que a su vez habla con Magento).
 import type { AuditLine, AuditRecord, AuditStatus, AuditSummary } from "./auditKinds";
 import type { MediaEntry, MediaRole, ProductSearchResult, Website } from "./types";
+import type { StockReport } from "./stockDiagnosis";
+
+export interface StockWidgetDto {
+  sku: string;
+  initial: number;
+  sources: string[];
+  text: string;
+  showAtOrBelow: number;
+  enabled: boolean;
+  updatedAt?: string;
+  updatedBy?: string | null;
+}
 
 export type LinkCheckResult =
   | { sku: string; byType: Record<string, number>; missing: { type: string; sku: string }[]; checked: boolean }
@@ -37,6 +49,11 @@ const json = (method: string, data: unknown): RequestInit => ({
 const enc = encodeURIComponent;
 
 export const api = {
+  stockReport: (sku: string) => request<StockReport>(`/api/stock/${enc(sku)}`),
+  stockWidgets: () => request<{ enabled: boolean; widgets: StockWidgetDto[] }>("/api/stock/widgets"),
+  saveStockWidget: (w: StockWidgetDto) => request<{ widget: StockWidgetDto }>("/api/stock/widgets", json("PUT", w)),
+  deleteStockWidget: (sku: string) => request<{ ok: true }>(`/api/stock/widgets?sku=${enc(sku)}`, { method: "DELETE" }),
+
   searchProducts: (f: { q: string; page: number; pageSize?: number; status?: string; website?: string; store?: string }) => {
     const p = new URLSearchParams({ q: f.q, page: String(f.page), pageSize: String(f.pageSize ?? 25) });
     if (f.status) p.set("status", f.status);

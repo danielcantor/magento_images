@@ -1,0 +1,350 @@
+"use client";
+import { useCallback, useEffect, useState } from "react";
+import { api, type StockWidgetDto } from "@/lib/api";
+import type { StockReport, StockRow } from "@/lib/stockDiagnosis";
+
+const DEFAULT_TEXT = "¡Solo quedan {n} unidades!";
+
+const STATE: Record<StockRow["state"], { label: string; cls: string }> = {
+  ok: { label: "OK", cls: "ok" },
+  reservations: { label: "Con reservas", cls: "warn" },
+  blocked: { label: "Bloqueado", cls: "err" },
+  "no-sources": { label: "Sin unidades", cls: "err" },
+  unassigned: { label: "No asignado", cls: "" },
+};
+
+interface PublicResult {
+  status: number;
+  body: { quedan?: number; inicial?: number; texto?: string; visible?: boolean; error?: string };
+}
+
+export default function StockView() {
+  const [sku, setSku] = useState("");
+  const [report, setReport] = useState<StockReport | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const [widgets, setWidgets] = useState<StockWidgetDto[]>([]);
+  const [widgetsEnabled, setWidgetsEnabled] = useState(true);
+  const [form, setForm] = useState<StockWidgetDto | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saveMsg, setSaveMsg] = useState<string | null>(null);
+  const [pub, setPub] = useState<PublicResult | null>(null);
+  const [origin, setOrigin] = useState("");
+
+  useEffect(() => setOrigin(window.location.origin), []);
+
+  const loadWidgets = useCallback(() => {
+    api
+      .stockWidgets()
+      .then((r) => {
+        setWidgetsEnabled(r.enabled);
+        setWidgets(r.widgets);
+      })
+      .catch((e) => setError((e as Error).message));
+  }, []);
+  useEffect(loadWidgets, [loadWidgets]);
+
+  async function testPublic(s: string) {
+    setPub(null);
+    try {
+      const r = await fetch(`/api/public/stock/${encodeURIComponent(s)}?t=${Date.now()}`, { cache: "no-store" });
+      setPub({ status: r.status, body: await r.json().catch(() => ({})) });
+    } catch (e) {
+      setPub({ status: 0, body: { error: (e as Error).message } });
+    }
+  }
+
+  async function search(target = sku) {
+    const s = target.trim();
+    if (!s) return;
+    setSku(s);
+    setLoading(true);
+    setError(null);
+    setReport(null);
+    setSaveMsg(null);
+    setPub(null);
+    try {
+      const r = await api.stockReport(s);
+      setReport(r);
+      const existing = widgets.find((w) => w.sku.toLowerCase() === s.toLowerCase());
+      const withUnits = r.sources.filter((x) => x.inStock && x.quantity > 0).map((x) => x.sourceCode);
+      const units = r.sources.filter((x) => withUnits.includes(x.sourceCode)).reduce((a, x) => a + x.quantity, 0);
+      setForm(
+        existing ?? { sku: s, initial: Math.max(1, Math.floor(units)), sources: withUnits, text: DEFAULT_TEXT, showAtOrBelow: 0, enabled: true },
+      );
+      if (existing) void testPublic(existing.sku);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function save() {
+    if (!form) return;
+    setSaving(true);
+    setSaveMsg(null);
+    try {
+      const { widget } = await api.saveStockWidget(form);
+      setForm(widget);
+      setSaveMsg("Contador guardado.");
+      loadWidgets();
+      await testPublic(widget.sku);
+    } catch (e) {
+      setSaveMsg((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function remove(s: string) {
+    if (!confirm(`¿Quitar el contador de ${s}? Dejará de mostrarse en la tienda.`)) return;
+    try {
+      await api.deleteStockWidget(s);
+      loadWidgets();
+      if (form?.sku.toLowerCase() === s.toLowerCase()) setPub(null);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+
+  const snippet = form
+    ? `<div data-stock-urgency data-sku="${form.sku.replace(/"/g, "&quot;")}"></div>\n<script src="${origin}/stock-widget.js" async></script>`
+    : "";
+
+  const toggleSource = (code: string) =>
+    form && setForm({ ...form, sources: form.sources.includes(code) ? form.sources.filter((c) => c !== code) : [...form.sources, code] });
+
+  const selectedUnits = report && form ? report.sources.filter((x) => x.inStock && (form.sources.length === 0 || form.sources.includes(x.sourceCode))).reduce((a, x) => a + x.quantity, 0) : 0;
+
+  return (
+    <div className="stack">
+      <h1>Stock y contador de unidades</h1>
+
+      <div className="card">
+        <form
+          className="row filters"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void search();
+          }}
+        >
+          <input className="grow" type="search" placeholder="SKU, p. ej. KCOLNEA140PROMO" value={sku} onChange={(e) => setSku(e.target.value)} />
+          <button className="primary" disabled={loading || !sku.trim()}>
+            {loading ? "Consultando…" : "Revisar stock"}
+          </button>
+        </form>
+        <p className="muted small" style={{ marginBottom: 0 }}>
+          Muestra las unidades por fuente (lo que sincroniza el ERP), la cantidad vendible de cada stock y las unidades retenidas por reservas.
+        </p>
+      </div>
+
+      {error && <div className="alert">{error}</div>}
+
+      {report && (
+        <>
+          {report.messages.length > 0 ? (
+            <div className="alert warn-box" style={{ display: "block" }}>
+              <b>Diagnóstico</b>
+              <ul style={{ margin: "8px 0 0" }}>
+                {report.messages.map((m) => (
+                  <li key={m}>{m}</li>
+                ))}
+              </ul>
+            </div>
+          ) : (
+            <div className="alert info">Sin problemas: la cantidad vendible coincide con las fuentes.</div>
+          )}
+
+          <div className="card">
+            <h2>Fuentes</h2>
+            {report.sources.length === 0 ? (
+              <p className="muted">El SKU no tiene fuentes asignadas (o no existe).</p>
+            ) : (
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Código</th>
+                      <th>Nombre</th>
+                      <th>Cantidad</th>
+                      <th>Estado</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {report.sources.map((s) => (
+                      <tr key={s.sourceCode}>
+                        <td>
+                          <code>{s.sourceCode}</code>
+                        </td>
+                        <td>
+                          {s.name}
+                          {s.enabled === false && <span className="badge" style={{ marginLeft: 6 }}>Fuente deshabilitada</span>}
+                        </td>
+                        <td>{s.quantity}</td>
+                        <td>{s.inStock ? <span className="badge ok">In Stock</span> : <span className="badge err">Out of Stock</span>}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          <div className="card">
+            <h2>Stocks (lo que ve cada web)</h2>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Stock</th>
+                    <th>Webs</th>
+                    <th>Fuentes</th>
+                    <th>Unidades en fuentes</th>
+                    <th>Vendible</th>
+                    <th>Retenidas</th>
+                    <th>Estado</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {report.stocks.map((r) => (
+                    <tr key={r.stockId}>
+                      <td>{r.name}</td>
+                      <td>{r.channels.join(", ") || <span className="muted">—</span>}</td>
+                      <td className="small">{r.sourceCodes.join(", ") || "—"}</td>
+                      <td>{r.sourceQty}</td>
+                      <td>
+                        <b>{r.salable ?? "—"}</b>
+                      </td>
+                      <td>{r.reserved ?? "—"}</td>
+                      <td>
+                        <span className={`badge ${STATE[r.state].cls}`}>{STATE[r.state].label}</span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="muted small" style={{ marginBottom: 0 }}>
+              «Retenidas» = unidades en fuentes − vendible. Incluye las reservas de pedidos que no se enviaron en Magento (y el umbral de agotado, si lo hay).
+            </p>
+          </div>
+
+          {form && widgetsEnabled && (
+            <div className="card stack">
+              <h2>Contador «Quedan X unidades» en la tienda</h2>
+              <p className="muted small">
+                El contador muestra la suma de las fuentes elegidas, que vienen del ERP. Así no le afectan las reservas. Solo indica cuántas quedan:
+                para que se pueda comprar, el stock de la web tiene que estar bien.
+              </p>
+              <div>
+                <b className="small">Fuentes que se suman</b>
+                <div className="row" style={{ marginTop: 6 }}>
+                  {report.sources.map((s) => (
+                    <label key={s.sourceCode} className="check">
+                      <input type="checkbox" checked={form.sources.includes(s.sourceCode)} onChange={() => toggleSource(s.sourceCode)} />
+                      {s.sourceCode} ({s.quantity})
+                    </label>
+                  ))}
+                </div>
+                <p className="muted small">Ahora mostraría: <b>{Math.max(0, Math.floor(selectedUnits))}</b> {form.sources.length === 0 && "(sin elegir = todas)"}</p>
+              </div>
+              <div className="row filters">
+                <label>
+                  Unidades iniciales
+                  <input type="number" min={1} value={form.initial} onChange={(e) => setForm({ ...form, initial: Number(e.target.value) })} style={{ width: 100 }} />
+                </label>
+                <label>
+                  Mostrar con
+                  <input type="number" min={0} value={form.showAtOrBelow} onChange={(e) => setForm({ ...form, showAtOrBelow: Number(e.target.value) })} style={{ width: 80 }} />
+                  o menos (0 = siempre)
+                </label>
+                <label className="check">
+                  <input type="checkbox" checked={form.enabled} onChange={(e) => setForm({ ...form, enabled: e.target.checked })} />
+                  Activo
+                </label>
+              </div>
+              <label className="row filters" style={{ display: "flex" }}>
+                <span className="muted small">Texto</span>
+                <input className="grow" type="text" value={form.text} onChange={(e) => setForm({ ...form, text: e.target.value })} />
+              </label>
+              <div className="row">
+                <button className="primary" onClick={save} disabled={saving}>
+                  {saving ? "Guardando…" : "Guardar contador"}
+                </button>
+                {saveMsg && <span className="small">{saveMsg}</span>}
+              </div>
+
+              {pub && (
+                <div className={pub.status === 200 ? "alert info" : "alert"}>
+                  {pub.status === 200 ? (
+                    <>
+                      Endpoint público OK: quedan <b>{pub.body.quedan}</b> de {pub.body.inicial}.{" "}
+                      {pub.body.visible ? "Se muestra en la tienda." : "Ahora no se muestra (sin unidades o por encima de «Mostrar con»)."}
+                    </>
+                  ) : (
+                    <>
+                      El endpoint público falló ({pub.status}): {pub.body.error ?? "error desconocido"}. Revisa que la integración de <code>MAGENTO_TOKEN</code> tenga
+                      permiso de lectura en <b>Stores → Inventory → Sources</b>.
+                    </>
+                  )}
+                </div>
+              )}
+
+              <div>
+                <b className="small">Código para pegar en la ficha del producto</b> <span className="muted small">(Page Builder → HTML Code, o Google Tag Manager)</span>
+                <textarea readOnly rows={3} value={snippet} onFocus={(e) => e.currentTarget.select()} style={{ marginTop: 6 }} />
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
+      {!widgetsEnabled && <div className="alert info">Para guardar contadores hace falta Vercel Blob (BLOB_READ_WRITE_TOKEN) en este entorno.</div>}
+
+      {widgets.length > 0 && (
+        <div className="card">
+          <h2>Contadores publicados</h2>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>SKU</th>
+                  <th>Fuentes</th>
+                  <th>Iniciales</th>
+                  <th>Estado</th>
+                  <th>Última edición</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {widgets.map((w) => (
+                  <tr key={w.sku}>
+                    <td>
+                      <code>{w.sku}</code>
+                    </td>
+                    <td className="small">{w.sources.join(", ") || "todas"}</td>
+                    <td>{w.initial}</td>
+                    <td>{w.enabled ? <span className="badge ok">Activo</span> : <span className="badge">Pausado</span>}</td>
+                    <td className="small muted">
+                      {w.updatedAt && new Date(w.updatedAt).toLocaleString("es-AR")} {w.updatedBy && `· ${w.updatedBy}`}
+                    </td>
+                    <td className="row">
+                      <button className="link" onClick={() => void search(w.sku)}>
+                        Abrir
+                      </button>
+                      <button className="link" onClick={() => void remove(w.sku)} style={{ color: "var(--err)" }}>
+                        Quitar
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

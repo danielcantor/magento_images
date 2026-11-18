@@ -57,6 +57,8 @@ interface FetchOptions {
   store?: string;
   /** Tiempo máximo de cada intento (por defecto 20 s lectura, 45 s escritura). */
   timeoutMs?: number;
+  /** Token fijo (p. ej. el de integración en endpoints públicos). Por defecto, el de la petición. */
+  token?: string;
 }
 
 export async function magentoFetch<T>(
@@ -71,7 +73,7 @@ export async function magentoFetch<T>(
 
   const headers: Record<string, string> = { "Content-Type": "application/json", Accept: "application/json" };
   if (opts.auth !== false) {
-    const token = await getRequestToken();
+    const token = opts.token ?? (await getRequestToken());
     if (!token) {
       throw userMode
         ? new MagentoError("Sesión caducada. Volvé a entrar.", 401)

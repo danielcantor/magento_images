@@ -22,7 +22,8 @@
   function render(el, data) {
     var n = data.quedan;
     var total = Math.max(data.inicial || n, n);
-    var pct = total > 0 ? Math.round(((total - n) / total) * 100) : 0;
+    // La barra muestra lo que queda: arranca llena y se vacía con cada venta.
+    var pct = total > 0 ? Math.round((n / total) * 100) : 0;
     var parts = String(data.texto || "¡Solo quedan {n} unidades!").split("{n}");
 
     el.innerHTML = "";
@@ -44,7 +45,7 @@
     el.appendChild(p);
     el.appendChild(track);
     setTimeout(function () {
-      bar.style.width = Math.max(pct, 8) + "%";
+      bar.style.width = Math.max(pct, 3) + "%";
     }, 100);
   }
 

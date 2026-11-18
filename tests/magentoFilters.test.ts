@@ -36,6 +36,12 @@ describe("buildProductSearch", () => {
     expect(g(p, 1, 0, "field")).toBeNull();
   });
 
+  it("sin imagen base: image vacío o no_selection, en OR dentro de su grupo", () => {
+    const p = buildProductSearch({ status: 1, noBase: true });
+    expect([g(p, 1, 0, "field"), g(p, 1, 0, "value"), g(p, 1, 0, "conditionType")]).toEqual(["image", "no_selection", "eq"]);
+    expect([g(p, 1, 1, "field"), g(p, 1, 1, "conditionType")]).toEqual(["image", "null"]);
+  });
+
   it("searchProducts devuelve websiteIds", async () => {
     fetchMock.mockResolvedValueOnce(
       json({ total_count: 1, items: [{ id: 1, sku: "A", name: "a", type_id: "simple", status: 1, extension_attributes: { website_ids: [1, 2] } }] }),

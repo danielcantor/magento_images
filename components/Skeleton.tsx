@@ -6,13 +6,13 @@ export function SkeletonRows({ count }: { count: number }) {
     <>
       {Array.from({ length: count }, (_, i) => (
         <tr key={i} className="skeleton-row" aria-hidden="true">
-          <td><span className="skeleton sk-box" /></td>
-          <td><span className="skeleton sk-thumb" /></td>
-          <td><span className="skeleton sk-line" style={{ width: 72 }} /></td>
-          <td><span className="skeleton sk-line" style={{ width: `${55 + ((i * 17) % 35)}%` }} /></td>
-          <td><span className="skeleton sk-pill" /></td>
-          <td><span className="skeleton sk-line" style={{ width: 90 }} /></td>
-          <td><span className="skeleton sk-pill" style={{ width: 28 }} /></td>
+          <td className="c-check"><span className="skeleton sk-box" /></td>
+          <td className="c-thumb"><span className="skeleton sk-thumb" /></td>
+          <td className="c-sku"><span className="skeleton sk-line" style={{ width: 72 }} /></td>
+          <td className="c-name"><span className="skeleton sk-line" style={{ width: `${55 + ((i * 17) % 35)}%` }} /></td>
+          <td className="c-status"><span className="skeleton sk-pill" /></td>
+          <td className="c-sites"><span className="skeleton sk-line" style={{ width: 90 }} /></td>
+          <td className="c-imgs"><span className="skeleton sk-pill" style={{ width: 28 }} /></td>
         </tr>
       ))}
     </>

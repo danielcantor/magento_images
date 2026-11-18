@@ -200,6 +200,8 @@ export interface ProductFilters {
   status?: 1 | 2;
   websiteId?: number;
   storeId?: number;
+  /** Solo productos sin imagen base (atributo `image` vacío o «no_selection»). */
+  noBase?: boolean;
 }
 
 export function buildProductSearch(opts: ProductFilters): URLSearchParams {
@@ -227,6 +229,7 @@ export function buildProductSearch(opts: ProductFilters): URLSearchParams {
   if (opts.status === 1 || opts.status === 2) add([["status", String(opts.status), "eq"]]);
   if (opts.websiteId) add([["website_id", String(opts.websiteId), "eq"]]);
   if (opts.storeId) add([["store_id", String(opts.storeId), "eq"]]);
+  if (opts.noBase) add([["image", "no_selection", "eq"], ["image", "", "null"]]);
 
   p.set(
     "fields",

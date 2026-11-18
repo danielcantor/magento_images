@@ -17,10 +17,12 @@ interface Filters {
   /** "" | "w:<websiteId>" | "s:<storeId>" */
   place: string;
   size: number;
+  /** "nobase" = solo productos sin imagen base. */
+  img: "" | "nobase";
 }
 
 function readInitialFilters(): Filters {
-  const f: Filters = { status: "", place: "", size: 25 };
+  const f: Filters = { status: "", place: "", size: 25, img: "" };
   try {
     const saved = Number(localStorage.getItem(SIZE_KEY));
     if ((PAGE_SIZES as readonly number[]).includes(saved)) f.size = saved;
@@ -33,6 +35,7 @@ function readInitialFilters(): Filters {
   if (st === "1" || st === "2") f.status = st;
   if (sp.get("website")) f.place = `w:${sp.get("website")}`;
   if (sp.get("store")) f.place = `s:${sp.get("store")}`;
+  if (sp.get("img") === "nobase") f.img = "nobase";
   const size = Number(sp.get("size"));
   if ((PAGE_SIZES as readonly number[]).includes(size)) f.size = size;
   return f;
@@ -73,6 +76,7 @@ export default function ProductsView({ syncStoresEnabled = false }: { syncStores
       if (next.status) sp.set("status", next.status);
       if (next.place.startsWith("w:")) sp.set("website", next.place.slice(2));
       if (next.place.startsWith("s:")) sp.set("store", next.place.slice(2));
+      if (next.img) sp.set("img", next.img);
       if (next.size !== 25) sp.set("size", String(next.size));
       window.history.replaceState(null, "", sp.size ? `?${sp}` : window.location.pathname);
       return next;
@@ -102,6 +106,7 @@ export default function ProductsView({ syncStoresEnabled = false }: { syncStores
         status: filters.status,
         website: filters.place.startsWith("w:") ? filters.place.slice(2) : undefined,
         store: filters.place.startsWith("s:") ? filters.place.slice(2) : undefined,
+        noBase: filters.img === "nobase",
       });
       setRows(r.items);
       setTotal(r.total);
@@ -190,6 +195,24 @@ export default function ProductsView({ syncStoresEnabled = false }: { syncStores
     await job.start("reparar-vinculos", (cb) => runLinkRepair(skus, cb), { skus });
   }
 
+  const pager = (where: string) => (
+    <div className="row pager" aria-label={`Paginación (${where})`}>
+      <span className="muted small">
+        {total.toLocaleString("es")} productos{filters?.img === "nobase" ? " sin imagen base" : ""}
+      </span>
+      <span className="spacer" />
+      <button onClick={() => setPage((p) => p - 1)} disabled={page <= 1 || loading}>
+        ← Anterior
+      </button>
+      <span className="small">
+        Página {page} de {pages}
+      </span>
+      <button onClick={() => setPage((p) => p + 1)} disabled={page >= pages || loading}>
+        Siguiente →
+      </button>
+    </div>
+  );
+
   return (
     <div className="stack">
       <h1 style={{ margin: 0 }}>Productos</h1>
@@ -231,6 +254,13 @@ export default function ProductsView({ syncStoresEnabled = false }: { syncStores
           </select>
         </label>
         <label>
+          Imagen base{" "}
+          <select value={filters?.img ?? ""} onChange={(e) => updateFilters({ img: e.target.value as Filters["img"] })} aria-label="Filtrar por imagen base">
+            <option value="">Todas</option>
+            <option value="nobase">Sin imagen base</option>
+          </select>
+        </label>
+        <label>
           Por página{" "}
           <select value={pageSize} onChange={(e) => updateFilters({ size: Number(e.target.value) })} aria-label="Productos por página">
             {PAGE_SIZES.map((n) => (
@@ -254,9 +284,15 @@ export default function ProductsView({ syncStoresEnabled = false }: { syncStores
 
       {error && <div className="alert">{error}</div>}
 
+      {pager("arriba")}
+      <label className="check select-page">
+        <input type="checkbox" checked={allOnPage} onChange={togglePage} />
+        Seleccionar los {rows.length} de esta página
+      </label>
+
       <div className="card" style={{ padding: 0 }}>
         <div className="table-wrap">
-          <table>
+          <table className="products-table">
             <thead>
               <tr>
                 <th style={{ width: 36 }}>
@@ -274,8 +310,10 @@ export default function ProductsView({ syncStoresEnabled = false }: { syncStores
               {showSkeleton && <SkeletonRows count={Math.min(pageSize, 10)} />}
               {!loading && rows.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="muted">
-                    No hay productos{query ? ` que coincidan con “${query}”` : ""}.
+                  <td colSpan={8} className="muted">
+                    {filters?.img === "nobase" && !query
+                      ? "Todos los productos de este filtro tienen imagen base."
+                      : `No hay productos${query ? ` que coincidan con “${query}”` : ""}.`}
                   </td>
                 </tr>
               )}
@@ -293,10 +331,12 @@ export default function ProductsView({ syncStoresEnabled = false }: { syncStores
                     tabIndex={0}
                     title="Abrir imágenes"
                   >
-                    <td onClick={(e) => e.stopPropagation()}>
-                      <input type="checkbox" checked={selected.has(r.sku)} onChange={() => toggle(r.sku)} aria-label={`Seleccionar ${r.sku}`} />
+                    <td className="c-check" onClick={(e) => e.stopPropagation()}>
+                      <label className="hit">
+                        <input type="checkbox" checked={selected.has(r.sku)} onChange={() => toggle(r.sku)} aria-label={`Seleccionar ${r.sku}`} />
+                      </label>
                     </td>
-                    <td>
+                    <td className="c-thumb">
                       {base ? (
                         // eslint-disable-next-line @next/next/no-img-element
                         <img className="thumb" src={base.url} alt="" loading="lazy" />
@@ -304,17 +344,26 @@ export default function ProductsView({ syncStoresEnabled = false }: { syncStores
                         <div className="thumb empty">—</div>
                       )}
                     </td>
-                    <td>
+                    <td className="c-sku">
                       <code>{r.sku}</code>
                     </td>
-                    <td>{r.name}</td>
-                    <td>
+                    <td className="c-name">{r.name}</td>
+                    <td className="c-status">
                       {r.status === 1 ? <span className="badge ok">Activo</span> : <span className="badge">Inactivo</span>}
                     </td>
-                    <td className="small">{r.websiteIds.length ? r.websiteIds.map(websiteName).join(", ") : <span className="muted">—</span>}</td>
-                    <td>
-                      <span className={`badge ${r.media.length ? "" : "warn"}`}>{r.media.length}</span>{" "}
+                    <td className="small c-sites">{r.websiteIds.length ? r.websiteIds.map(websiteName).join(", ") : <span className="muted">—</span>}</td>
+                    <td className="c-imgs">
+                      <span className={`badge ${r.media.length ? "" : "warn"}`} title="Imágenes">{r.media.length}</span>{" "}
                       {noBase && <span className="badge warn">sin base</span>}
+                    </td>
+                    {/* Solo en celular: estado, imágenes y sitios en una línea bajo el nombre. */}
+                    <td className="c-meta" aria-hidden="true">
+                      {r.status === 1 ? <span className="badge ok">Activo</span> : <span className="badge">Inactivo</span>}
+                      <span className={`badge ${r.media.length ? "" : "warn"}`}>
+                        {r.media.length ? `${r.media.length} ${r.media.length === 1 ? "imagen" : "imágenes"}` : "sin imágenes"}
+                      </span>
+                      {noBase && <span className="badge warn">sin base</span>}
+                      <span className="muted small">{r.websiteIds.map(websiteName).join(", ")}</span>
                     </td>
                   </tr>
                 );
@@ -324,19 +373,7 @@ export default function ProductsView({ syncStoresEnabled = false }: { syncStores
         </div>
       </div>
 
-      <div className="row">
-        <span className="muted small">{total.toLocaleString("es")} productos</span>
-        <span className="spacer" />
-        <button onClick={() => setPage((p) => p - 1)} disabled={page <= 1 || loading}>
-          ← Anterior
-        </button>
-        <span className="small">
-          Página {page} de {pages}
-        </span>
-        <button onClick={() => setPage((p) => p + 1)} disabled={page >= pages || loading}>
-          Siguiente →
-        </button>
-      </div>
+      {pager("abajo")}
 
       {selected.size > 0 && (
         <div className="bulkbar">

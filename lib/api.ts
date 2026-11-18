@@ -67,11 +67,12 @@ export const api = {
     ),
   deleteStockWidget: (sku: string) => request<{ ok: true }>(`/api/stock/widgets?sku=${enc(sku)}`, { method: "DELETE" }),
 
-  searchProducts: (f: { q: string; page: number; pageSize?: number; status?: string; website?: string; store?: string }) => {
+  searchProducts: (f: { q: string; page: number; pageSize?: number; status?: string; website?: string; store?: string; noBase?: boolean }) => {
     const p = new URLSearchParams({ q: f.q, page: String(f.page), pageSize: String(f.pageSize ?? 25) });
     if (f.status) p.set("status", f.status);
     if (f.website) p.set("website", f.website);
     if (f.store) p.set("store", f.store);
+    if (f.noBase) p.set("noBase", "1");
     return request<ProductSearchResult>(`/api/products?${p}`);
   },
 

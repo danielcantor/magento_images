@@ -3,7 +3,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   DndContext,
   KeyboardSensor,
-  PointerSensor,
+  MouseSensor,
+  TouchSensor,
   closestCenter,
   useSensor,
   useSensors,
@@ -131,9 +132,21 @@ export default function MediaEditor({ sku, name, syncStoresEnabled = false, expe
     });
 
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
+    // En pantallas táctiles se arrastra manteniendo pulsado: deslizar sigue haciendo scroll.
+    useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 8 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
+
+  /** Mueve una imagen un puesto (botones ← →, alternativa al arrastre). */
+  function move(id: number, delta: -1 | 1) {
+    setItems((list) => {
+      const from = list.findIndex((e) => e.id === id);
+      const to = from + delta;
+      if (from < 0 || to < 0 || to >= list.length) return list;
+      return arrayMove(list, from, to);
+    });
+  }
 
   function onDragEnd(ev: DragEndEvent) {
     const { active, over } = ev;
@@ -343,7 +356,7 @@ export default function MediaEditor({ sku, name, syncStoresEnabled = false, expe
           ) : (
             <>
               <p className="muted small" style={{ margin: 0 }}>
-                Arrastrá las imágenes para cambiar el orden. Tocá un rol para asignarlo (cada rol solo puede estar en una imagen).
+                Arrastrá las imágenes (en el celular, mantené pulsado) o usá ← → para cambiar el orden. Tocá un rol para asignarlo (cada rol solo puede estar en una imagen).
               </p>
               <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
                 <SortableContext items={items.map((e) => e.id)} strategy={rectSortingStrategy}>
@@ -353,6 +366,8 @@ export default function MediaEditor({ sku, name, syncStoresEnabled = false, expe
                         key={e.id}
                         entry={e}
                         index={i}
+                        count={items.length}
+                        onMove={(d) => move(e.id, d)}
                         roles={roles}
                         dirty={dirtyIds.has(e.id)}
                         disabled={!!busy}
@@ -402,6 +417,8 @@ export default function MediaEditor({ sku, name, syncStoresEnabled = false, expe
 function MediaCard(props: {
   entry: MediaEntry;
   index: number;
+  count: number;
+  onMove: (delta: -1 | 1) => void;
   roles: MediaRole[];
   dirty: boolean;
   disabled: boolean;
@@ -426,6 +443,15 @@ function MediaCard(props: {
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={e.url} alt={e.label ?? ""} loading="lazy" />
         <span className="pos">{index + 1}</span>
+      </div>
+      <div className="move-row">
+        <button type="button" onClick={() => props.onMove(-1)} disabled={disabled || index === 0} aria-label={`Mover la imagen ${index + 1} a la izquierda`} title="Mover antes">
+          ←
+        </button>
+        <span className="small muted">Posición {index + 1} de {props.count}</span>
+        <button type="button" onClick={() => props.onMove(1)} disabled={disabled || index === props.count - 1} aria-label={`Mover la imagen ${index + 1} a la derecha`} title="Mover después">
+          →
+        </button>
       </div>
       <div className="media-body">
         <div className="roles">

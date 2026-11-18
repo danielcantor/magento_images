@@ -20,5 +20,6 @@ export const GET = handle(async (req: Request) => {
     status: status === 1 || status === 2 ? status : undefined,
     websiteId: positiveInt(sp.get("website")),
     storeId: positiveInt(sp.get("store")),
+    noBase: sp.get("noBase") === "1",
   });
 });

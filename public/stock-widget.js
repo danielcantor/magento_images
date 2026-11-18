@@ -22,8 +22,10 @@
   function render(el, data) {
     var n = data.quedan;
     var total = Math.max(data.inicial || n, n);
-    // La barra muestra lo vendido respecto de las unidades iniciales: arranca vacía y se llena con cada venta.
-    var pct = total > 0 ? Math.min(100, Math.max(0, ((total - n) / total) * 100)) : 0;
+    // La barra muestra lo vendido respecto de las unidades iniciales: arranca al 50% y llega al 100%
+    // cuando se vende todo (50% + la mitad del porcentaje vendido).
+    var sold = total > 0 ? Math.min(1, Math.max(0, (total - n) / total)) : 0;
+    var pct = 50 + sold * 50;
     var parts = String(data.texto || "¡Solo quedan {n} unidades!").split("{n}");
 
     el.innerHTML = "";

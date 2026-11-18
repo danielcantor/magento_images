@@ -29,7 +29,7 @@
     var parts = String(data.texto || "¡Solo quedan {n} unidades!").split("{n}");
 
     el.innerHTML = "";
-    el.style.cssText = "margin:23px 0;font-family:inherit";
+    el.style.cssText = "margin:40px 0;font-family:inherit";
     var p = document.createElement("p");
     p.style.cssText = "margin:0 0 6px;font-weight:600;color:#c0392b";
     p.appendChild(document.createTextNode("🔥 " + parts[0]));

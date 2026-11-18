@@ -90,6 +90,12 @@
       anchor.parentNode.insertBefore(el, anchor.nextSibling);
       return el;
     }
+    // Tema de SommierCenter: debajo de «Ver más medios de pago».
+    var payment = document.querySelector(".product-info-main .pdp-actions-payment");
+    if (payment) {
+      payment.parentNode.insertBefore(el, payment.nextSibling);
+      return el;
+    }
     var price = document.querySelector(".product-info-main .product-info-price");
     if (price) {
       price.parentNode.insertBefore(el, price.nextSibling);

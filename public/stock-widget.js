@@ -1,11 +1,22 @@
 /* Contador "Quedan X unidades" para la tienda.
- * Uso:
- *   <div data-stock-urgency data-sku="TU-SKU"></div>
+ *
+ * Modo global (recomendado): se pega UNA vez en toda la tienda. En cada ficha de producto
+ * detecta el SKU y, si tiene un contador activo en el dashboard, lo muestra.
  *   <script src="https://TU-DASHBOARD/stock-widget.js" async></script>
+ *   Opcional en el <script>:
+ *     data-sku-selector="..."   dónde leer el SKU (atributo content o texto)
+ *     data-insert-after="..."   después de qué elemento se coloca el contador
+ *
+ * Modo manual (un producto): <div data-stock-urgency data-sku="TU-SKU"></div> + el mismo <script>.
  * Si algo falla o no quedan unidades, no muestra nada.
  */
 (function () {
-  var script = document.currentScript;
+  // Si el script está dos veces en la página (global + manual), solo actúa una.
+  if (window.__stockUrgency) return;
+  window.__stockUrgency = true;
+
+  // currentScript puede ser null si lo inyecta Google Tag Manager: se busca por la URL.
+  var script = document.currentScript || document.querySelector('script[src*="stock-widget.js"]');
   var origin = script && script.src ? new URL(script.src).origin : "";
 
   function render(el, data) {
@@ -54,9 +65,82 @@
       .catch(function () {});
   }
 
+  function attr(name) {
+    return script ? script.getAttribute(name) : null;
+  }
+
+  function readSku() {
+    var selectors = [attr("data-sku-selector"), '[itemprop="sku"]', ".product.attribute.sku .value", "[data-product-sku]"];
+    for (var i = 0; i < selectors.length; i++) {
+      if (!selectors[i]) continue;
+      var el = document.querySelector(selectors[i]);
+      if (!el) continue;
+      var v = el.getAttribute("content") || el.getAttribute("data-product-sku") || el.textContent;
+      if (v && v.trim()) return v.trim();
+    }
+    return null;
+  }
+
+  function placeholder() {
+    var el = document.createElement("div");
+    el.setAttribute("data-stock-urgency", "");
+    var after = attr("data-insert-after");
+    var anchor = after && document.querySelector(after);
+    if (anchor) {
+      anchor.parentNode.insertBefore(el, anchor.nextSibling);
+      return el;
+    }
+    var price = document.querySelector(".product-info-main .product-info-price");
+    if (price) {
+      price.parentNode.insertBefore(el, price.nextSibling);
+      return el;
+    }
+    var form = document.querySelector(".product-add-form");
+    if (form) {
+      form.parentNode.insertBefore(el, form);
+      return el;
+    }
+    var main = document.querySelector(".product-info-main");
+    if (main) {
+      main.appendChild(el);
+      return el;
+    }
+    return null;
+  }
+
+  function auto() {
+    // Solo en fichas de producto (Magento pone esta clase en <body>), salvo que se indique dónde leer el SKU.
+    if (!attr("data-sku-selector") && !document.body.classList.contains("catalog-product-view")) return;
+    var sku = readSku();
+    if (!sku || !origin) return;
+    fetch(origin + "/api/public/stock-active")
+      .then(function (r) {
+        return r.ok ? r.json() : null;
+      })
+      .then(function (data) {
+        var skus = (data && data.skus) || [];
+        var want = sku.toLowerCase();
+        for (var i = 0; i < skus.length; i++) {
+          if (String(skus[i]).toLowerCase() === want) {
+            var el = placeholder();
+            if (el) {
+              el.setAttribute("data-sku", skus[i]);
+              load(el);
+            }
+            return;
+          }
+        }
+      })
+      .catch(function () {});
+  }
+
   function init() {
     var els = document.querySelectorAll("[data-stock-urgency]");
-    for (var i = 0; i < els.length; i++) load(els[i]);
+    if (els.length) {
+      for (var i = 0; i < els.length; i++) load(els[i]);
+    } else {
+      auto();
+    }
   }
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);

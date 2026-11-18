@@ -137,6 +137,8 @@ export default function StockView() {
     }
   }
 
+  const globalSnippet = `<script src="${origin}/stock-widget.js" async></script>`;
+
   const snippet = form
     ? `<div data-stock-urgency data-sku="${form.sku.replace(/"/g, "&quot;")}"></div>\n<script src="${origin}/stock-widget.js" async></script>`
     : "";
@@ -410,7 +412,16 @@ export default function StockView() {
               )}
 
               <div>
-                <b className="small">Código para pegar en la ficha del producto</b> <span className="muted small">(Page Builder → HTML Code, o Google Tag Manager)</span>
+                <b className="small">Instalación global (una sola vez para toda la tienda, recomendado)</b>
+                <p className="muted small" style={{ margin: "4px 0 0" }}>
+                  Pégalo en <b>Content → Design → Configuration</b> → tu tienda → <b>Footer → Miscellaneous HTML</b> (o en una etiqueta de Google Tag Manager).
+                  Cada ficha detecta su SKU y muestra el contador solo si está activo aquí. No hace falta tocar productos.
+                </p>
+                <textarea readOnly rows={1} value={globalSnippet} onFocus={(e) => e.currentTarget.select()} style={{ marginTop: 6 }} />
+              </div>
+
+              <div>
+                <b className="small">O solo en esta ficha: código para pegar en el producto</b> <span className="muted small">(Page Builder → HTML Code, o Google Tag Manager)</span>
                 <textarea readOnly rows={3} value={snippet} onFocus={(e) => e.currentTarget.select()} style={{ marginTop: 6 }} />
               </div>
             </div>

@@ -87,6 +87,30 @@ export function remainingUnits(items: SourceItem[], sourceCodes: string[]): numb
 // ---------------------------------------------------------------------------
 // Ventas: unidades vendidas de un SKU en pedidos.
 
+/** Estados de pedido que la tienda considera compra. */
+export const DEFAULT_SALE_STATUSES = [
+  "processing",
+  "pre_approved",
+  "approved_clearsale",
+  "analyzing_clearsale",
+  "complete",
+  "Approved Signifyd",
+  "SIGNIFYD_APPROVED",
+];
+
+/** Estado válido: letras, números, _, - y espacios (sin comas: van en un filtro "in"). */
+export function cleanStatuses(list: unknown[]): string[] {
+  const out: string[] = [];
+  for (const x of list) {
+    if (typeof x !== "string") continue;
+    const v = x.trim();
+    if (/^[A-Za-z0-9_\- ]{1,64}$/.test(v) && !out.some((o) => o.toLowerCase() === v.toLowerCase())) out.push(v);
+  }
+  return out;
+}
+
+export const statusMatches = (status: string, statuses: string[]) => statuses.some((s) => s.toLowerCase() === (status ?? "").toLowerCase());
+
 export interface OrderItemLite {
   item_id?: number;
   parent_item_id?: number | null;

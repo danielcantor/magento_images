@@ -56,7 +56,12 @@ export const api = {
   stockWidgets: () => request<{ enabled: boolean; widgets: StockWidgetDto[] }>("/api/stock/widgets"),
   saveStockWidget: (w: StockWidgetDto) => request<{ widget: StockWidgetDto }>("/api/stock/widgets", json("PUT", w)),
   previewStockSales: (w: StockWidgetDto) =>
-    request<{ units: number; quedan: number; orders: { incrementId: string; status: string; createdAt: string; units: number }[] }>(
+    request<{
+      units: number;
+      quedan: number;
+      orders: { incrementId: string; status: string; createdAt: string; units: number }[];
+      excluded: Record<string, { orders: number; units: number }>;
+    }>(
       "/api/stock/widgets/preview",
       json("POST", w),
     ),

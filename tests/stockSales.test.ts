@@ -48,10 +48,10 @@ describe("countSoldUnits", () => {
     expect(r.orders).toHaveLength(65);
     expect(fetchMock).toHaveBeenCalledTimes(2);
     const q = new URL(fetchMock.mock.calls[0][0]).searchParams;
-    expect(q.get("searchCriteria[filter_groups][0][filters][0][field]")).toBe("status");
-    expect(q.get("searchCriteria[filter_groups][0][filters][0][value]")).toBe("processing");
-    expect(q.get("searchCriteria[filter_groups][1][filters][0][value]")).toBe("2026-11-18 13:00:00");
-    expect(q.get("searchCriteria[filter_groups][1][filters][0][condition_type]")).toBe("gteq");
+    expect(q.get("searchCriteria[filter_groups][1][filters][0][field]")).toBe("status");
+    expect(q.get("searchCriteria[filter_groups][1][filters][0][value]")).toBe("processing");
+    expect(q.get("searchCriteria[filter_groups][0][filters][0][value]")).toBe("2026-11-18 13:00:00");
+    expect(q.get("searchCriteria[filter_groups][0][filters][0][condition_type]")).toBe("gteq");
   });
 
   it("el endpoint público en modo ventas devuelve iniciales − vendidas", async () => {
@@ -65,6 +65,25 @@ describe("countSoldUnits", () => {
     const res = await GET(new Request("https://d.test/api/public/stock/K"), { params: Promise.resolve({ sku: "K" }) });
     expect(await res.json()).toMatchObject({ quedan: 47, inicial: 50, visible: true });
     setWidgetStoreForTests(null);
+  });
+
+  it("acepta los estados de la tienda tal cual (con espacios y mayúsculas)", async () => {
+    const { DEFAULT_SALE_STATUSES } = await import("@/lib/stockDiagnosis");
+    const w = parseWidgetInput({ sku: "K", initial: 5, mode: "orders", since: "2026-11-18T00:00:00Z", statuses: [...DEFAULT_SALE_STATUSES, "processing", "a,b"] });
+    expect(w.statuses).toEqual(DEFAULT_SALE_STATUSES);
+    const fetchMock = vi.fn().mockResolvedValue(json({ items: [], total_count: 0 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await countSoldUnits("K", w.since!, w.statuses);
+    expect(new URL(fetchMock.mock.calls[0][0]).searchParams.get("searchCriteria[filter_groups][1][filters][0][value]")).toBe(
+      "processing,pre_approved,approved_clearsale,analyzing_clearsale,complete,Approved Signifyd,SIGNIFYD_APPROVED",
+    );
+  });
+
+  it("sin estados (detalle del dashboard) no filtra por estado", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(json({ items: [], total_count: 0 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await countSoldUnits("K", "2026-11-18T00:00:00Z", null);
+    expect(new URL(fetchMock.mock.calls[0][0]).searchParams.has("searchCriteria[filter_groups][1][filters][0][field]")).toBe(false);
   });
 
   it("el modo ventas exige fecha y estados", () => {

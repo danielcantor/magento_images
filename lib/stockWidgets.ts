@@ -3,6 +3,7 @@
 import "server-only";
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { cleanStatuses } from "./stockDiagnosis";
 import { get as blobGet, list as blobList, put as blobPut, del as blobDel } from "@vercel/blob";
 
 export type WidgetMode = "sources" | "orders";
@@ -168,10 +169,7 @@ export function parseWidgetInput(body: unknown): Omit<StockWidget, "updatedAt" |
     const d = typeof b.since === "string" ? new Date(b.since) : null;
     if (!d || Number.isNaN(d.getTime())) throw new WidgetInputError("Indica desde cuándo se cuentan las ventas (inicio de la campaña)");
     since = d.toISOString();
-    statuses = (Array.isArray(b.statuses) ? b.statuses : [])
-      .filter((x): x is string => typeof x === "string")
-      .map((x) => x.trim().toLowerCase())
-      .filter((x) => /^[a-z0-9_]{1,32}$/.test(x));
+    statuses = cleanStatuses(Array.isArray(b.statuses) ? b.statuses : []);
     if (!statuses.length) throw new WidgetInputError("Elige al menos un estado de pedido (p. ej. processing)");
   }
   return { sku, mode, since, statuses, initial, sources, text, showAtOrBelow, enabled: b.enabled !== false };

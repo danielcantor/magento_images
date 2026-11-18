@@ -1,7 +1,7 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import { api, type StockWidgetDto } from "@/lib/api";
-import type { StockReport, StockRow } from "@/lib/stockDiagnosis";
+import { DEFAULT_SALE_STATUSES, type StockReport, type StockRow } from "@/lib/stockDiagnosis";
 
 const DEFAULT_TEXT = "¡Solo quedan {n} unidades!";
 
@@ -20,7 +20,7 @@ function toLocalInput(iso: string | null): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-type SalesPreview = { units: number; quedan: number; orders: { incrementId: string; status: string; createdAt: string; units: number }[] };
+type SalesPreview = Awaited<ReturnType<typeof api.previewStockSales>>;
 
 interface PublicResult {
   status: number;
@@ -85,7 +85,7 @@ export default function StockView() {
       const withUnits = r.sources.filter((x) => x.inStock && x.quantity > 0).map((x) => x.sourceCode);
       const units = r.sources.filter((x) => withUnits.includes(x.sourceCode)).reduce((a, x) => a + x.quantity, 0);
       setForm(
-        existing ?? { sku: s, mode: "sources", since: null, statuses: ["processing"], initial: Math.max(1, Math.floor(units)), sources: withUnits, text: DEFAULT_TEXT, showAtOrBelow: 0, enabled: true },
+        existing ?? { sku: s, mode: "sources", since: null, statuses: DEFAULT_SALE_STATUSES, initial: Math.max(1, Math.floor(units)), sources: withUnits, text: DEFAULT_TEXT, showAtOrBelow: 0, enabled: true },
       );
       if (existing) void testPublic(existing.sku);
     } catch (e) {
@@ -275,7 +275,7 @@ export default function StockView() {
                     type="radio"
                     name="mode"
                     checked={form.mode === "orders"}
-                    onChange={() => setForm({ ...form, mode: "orders", since: form.since ?? new Date().toISOString(), statuses: form.statuses.length ? form.statuses : ["processing"] })}
+                    onChange={() => setForm({ ...form, mode: "orders", since: form.since ?? new Date().toISOString(), statuses: form.statuses.length ? form.statuses : DEFAULT_SALE_STATUSES })}
                   />
                   Según las ventas (iniciales − vendidas)
                 </label>
@@ -295,9 +295,10 @@ export default function StockView() {
                       Estados
                       <input
                         type="text"
-                        value={form.statuses.join(", ")}
-                        onChange={(e) => setForm({ ...form, statuses: e.target.value.split(",").map((x) => x.trim()).filter(Boolean) })}
-                        style={{ width: 220 }}
+                        key={`${form.sku}:${form.updatedAt ?? ""}`}
+                        defaultValue={form.statuses.join(", ")}
+                        onBlur={(e) => setForm({ ...form, statuses: e.target.value.split(",").map((x) => x.trim()).filter(Boolean) })}
+                        style={{ width: 520, maxWidth: "100%" }}
                       />
                     </label>
                     <button type="button" onClick={previewSales} disabled={salesLoading}>
@@ -337,6 +338,15 @@ export default function StockView() {
                             </tbody>
                           </table>
                         </div>
+                      )}
+                      {Object.keys(sales.excluded).length > 0 && (
+                        <p className="small" style={{ marginBottom: 0 }}>
+                          <b>No se cuentan</b> (estado fuera de la lista):{" "}
+                          {Object.entries(sales.excluded)
+                            .map(([st, e]) => `${st}: ${e.units} u. en ${e.orders} pedido(s)`)
+                            .join(" · ")}
+                          . Si alguno es una compra, añade ese código a «Estados».
+                        </p>
                       )}
                     </div>
                   )}

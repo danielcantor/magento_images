@@ -5,6 +5,9 @@ import type { StockReport } from "./stockDiagnosis";
 
 export interface StockWidgetDto {
   sku: string;
+  mode: "sources" | "orders";
+  since: string | null;
+  statuses: string[];
   initial: number;
   sources: string[];
   text: string;
@@ -52,6 +55,11 @@ export const api = {
   stockReport: (sku: string) => request<StockReport>(`/api/stock/${enc(sku)}`),
   stockWidgets: () => request<{ enabled: boolean; widgets: StockWidgetDto[] }>("/api/stock/widgets"),
   saveStockWidget: (w: StockWidgetDto) => request<{ widget: StockWidgetDto }>("/api/stock/widgets", json("PUT", w)),
+  previewStockSales: (w: StockWidgetDto) =>
+    request<{ units: number; quedan: number; orders: { incrementId: string; status: string; createdAt: string; units: number }[] }>(
+      "/api/stock/widgets/preview",
+      json("POST", w),
+    ),
   deleteStockWidget: (sku: string) => request<{ ok: true }>(`/api/stock/widgets?sku=${enc(sku)}`, { method: "DELETE" }),
 
   searchProducts: (f: { q: string; page: number; pageSize?: number; status?: string; website?: string; store?: string }) => {

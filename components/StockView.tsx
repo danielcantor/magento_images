@@ -13,6 +13,15 @@ const STATE: Record<StockRow["state"], { label: string; cls: string }> = {
   unassigned: { label: "No asignado", cls: "" },
 };
 
+/** ISO → valor de <input type="datetime-local"> en hora local. */
+function toLocalInput(iso: string | null): string {
+  const d = iso ? new Date(iso) : new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+type SalesPreview = { units: number; quedan: number; orders: { incrementId: string; status: string; createdAt: string; units: number }[] };
+
 interface PublicResult {
   status: number;
   body: { quedan?: number; inicial?: number; texto?: string; visible?: boolean; error?: string };
@@ -31,6 +40,9 @@ export default function StockView() {
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
   const [pub, setPub] = useState<PublicResult | null>(null);
   const [origin, setOrigin] = useState("");
+  const [sales, setSales] = useState<SalesPreview | null>(null);
+  const [salesLoading, setSalesLoading] = useState(false);
+  const [salesError, setSalesError] = useState<string | null>(null);
 
   useEffect(() => setOrigin(window.location.origin), []);
 
@@ -64,6 +76,8 @@ export default function StockView() {
     setReport(null);
     setSaveMsg(null);
     setPub(null);
+    setSales(null);
+    setSalesError(null);
     try {
       const r = await api.stockReport(s);
       setReport(r);
@@ -71,7 +85,7 @@ export default function StockView() {
       const withUnits = r.sources.filter((x) => x.inStock && x.quantity > 0).map((x) => x.sourceCode);
       const units = r.sources.filter((x) => withUnits.includes(x.sourceCode)).reduce((a, x) => a + x.quantity, 0);
       setForm(
-        existing ?? { sku: s, initial: Math.max(1, Math.floor(units)), sources: withUnits, text: DEFAULT_TEXT, showAtOrBelow: 0, enabled: true },
+        existing ?? { sku: s, mode: "sources", since: null, statuses: ["processing"], initial: Math.max(1, Math.floor(units)), sources: withUnits, text: DEFAULT_TEXT, showAtOrBelow: 0, enabled: true },
       );
       if (existing) void testPublic(existing.sku);
     } catch (e) {
@@ -95,6 +109,20 @@ export default function StockView() {
       setSaveMsg((e as Error).message);
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function previewSales() {
+    if (!form) return;
+    setSalesLoading(true);
+    setSalesError(null);
+    try {
+      setSales(await api.previewStockSales(form));
+    } catch (e) {
+      setSales(null);
+      setSalesError((e as Error).message);
+    } finally {
+      setSalesLoading(false);
     }
   }
 
@@ -235,9 +263,86 @@ export default function StockView() {
             <div className="card stack">
               <h2>Contador «Quedan X unidades» en la tienda</h2>
               <p className="muted small">
-                El contador muestra la suma de las fuentes elegidas, que vienen del ERP. Así no le afectan las reservas. Solo indica cuántas quedan:
-                para que se pueda comprar, el stock de la web tiene que estar bien.
+                No le afectan las reservas. Solo indica cuántas quedan: para que se pueda comprar, el stock de la web tiene que estar bien.
               </p>
+              <div className="row" style={{ gap: 18 }}>
+                <label className="check">
+                  <input type="radio" name="mode" checked={form.mode === "sources"} onChange={() => setForm({ ...form, mode: "sources" })} />
+                  Según el stock del ERP (fuentes)
+                </label>
+                <label className="check">
+                  <input
+                    type="radio"
+                    name="mode"
+                    checked={form.mode === "orders"}
+                    onChange={() => setForm({ ...form, mode: "orders", since: form.since ?? new Date().toISOString(), statuses: form.statuses.length ? form.statuses : ["processing"] })}
+                  />
+                  Según las ventas (iniciales − vendidas)
+                </label>
+              </div>
+              {form.mode === "orders" && (
+                <div className="stack">
+                  <div className="row filters">
+                    <label>
+                      Contar ventas desde
+                      <input
+                        type="datetime-local"
+                        value={toLocalInput(form.since)}
+                        onChange={(e) => e.target.value && setForm({ ...form, since: new Date(e.target.value).toISOString() })}
+                      />
+                    </label>
+                    <label>
+                      Estados
+                      <input
+                        type="text"
+                        value={form.statuses.join(", ")}
+                        onChange={(e) => setForm({ ...form, statuses: e.target.value.split(",").map((x) => x.trim()).filter(Boolean) })}
+                        style={{ width: 220 }}
+                      />
+                    </label>
+                    <button type="button" onClick={previewSales} disabled={salesLoading}>
+                      {salesLoading ? "Contando…" : "Ver ventas contadas"}
+                    </button>
+                  </div>
+                  <p className="muted small" style={{ margin: 0 }}>
+                    Quedan = unidades iniciales − unidades de este SKU en pedidos con esos estados creados desde esa fecha (sin canceladas ni reembolsadas).
+                    Usa la fecha de inicio de la campaña: si es anterior, contará ventas viejas.
+                  </p>
+                  {salesError && <div className="alert">{salesError}</div>}
+                  {sales && (
+                    <div className="alert info">
+                      Vendidas: <b>{sales.units}</b> en {sales.orders.length} pedido(s) → quedan <b>{sales.quedan}</b> de {form.initial}.
+                      {sales.orders.length > 0 && (
+                        <div className="table-wrap" style={{ marginTop: 8, maxHeight: 240, overflowY: "auto" }}>
+                          <table>
+                            <thead>
+                              <tr>
+                                <th>Pedido</th>
+                                <th>Estado</th>
+                                <th>Fecha (UTC)</th>
+                                <th>Unidades</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {sales.orders.map((o) => (
+                                <tr key={o.incrementId}>
+                                  <td>
+                                    <code>{o.incrementId}</code>
+                                  </td>
+                                  <td>{o.status}</td>
+                                  <td className="small">{o.createdAt}</td>
+                                  <td>{o.units}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+              {form.mode === "sources" && (
               <div>
                 <b className="small">Fuentes que se suman</b>
                 <div className="row" style={{ marginTop: 6 }}>
@@ -250,6 +355,7 @@ export default function StockView() {
                 </div>
                 <p className="muted small">Ahora mostraría: <b>{Math.max(0, Math.floor(selectedUnits))}</b> {form.sources.length === 0 && "(sin elegir = todas)"}</p>
               </div>
+              )}
               <div className="row filters">
                 <label>
                   Unidades iniciales
@@ -286,7 +392,8 @@ export default function StockView() {
                   ) : (
                     <>
                       El endpoint público falló ({pub.status}): {pub.body.error ?? "error desconocido"}. Revisa que la integración de <code>MAGENTO_TOKEN</code> tenga
-                      permiso de lectura en <b>Stores → Inventory → Sources</b>.
+                      permiso de lectura en{" "}
+                      {form.mode === "orders" ? <b>Sales → Operations → Orders</b> : <b>Stores → Inventory → Sources</b>}.
                     </>
                   )}
                 </div>
@@ -311,7 +418,7 @@ export default function StockView() {
               <thead>
                 <tr>
                   <th>SKU</th>
-                  <th>Fuentes</th>
+                  <th>Cálculo</th>
                   <th>Iniciales</th>
                   <th>Estado</th>
                   <th>Última edición</th>
@@ -324,7 +431,9 @@ export default function StockView() {
                     <td>
                       <code>{w.sku}</code>
                     </td>
-                    <td className="small">{w.sources.join(", ") || "todas"}</td>
+                    <td className="small">
+                      {w.mode === "orders" ? `Ventas (${w.statuses.join(", ")}) desde ${new Date(w.since ?? "").toLocaleString("es-AR")}` : `Fuentes: ${w.sources.join(", ") || "todas"}`}
+                    </td>
                     <td>{w.initial}</td>
                     <td>{w.enabled ? <span className="badge ok">Activo</span> : <span className="badge">Pausado</span>}</td>
                     <td className="small muted">

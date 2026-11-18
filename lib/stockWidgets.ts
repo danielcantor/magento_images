@@ -5,8 +5,19 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { get as blobGet, list as blobList, put as blobPut, del as blobDel } from "@vercel/blob";
 
+export type WidgetMode = "sources" | "orders";
+
 export interface StockWidget {
   sku: string;
+  /**
+   * "sources": quedan = suma de las fuentes (lo que sincroniza el ERP).
+   * "orders": quedan = iniciales − unidades vendidas desde `since` en pedidos con `statuses`.
+   */
+  mode: WidgetMode;
+  /** Inicio de la campaña (ISO, UTC). Solo modo "orders". */
+  since: string | null;
+  /** Estados de pedido que cuentan como venta. Solo modo "orders". */
+  statuses: string[];
   /** Unidades con las que arrancó la campaña (para la barra de progreso). */
   initial: number;
   /** Fuentes que se suman para "quedan" (las que sincroniza el ERP). Vacío = todas. */
@@ -117,7 +128,7 @@ export async function getWidget(sku: string, opts: { cached?: boolean } = {}): P
   const hit = cache.get(k);
   if (opts.cached && hit && Date.now() - hit.at < CACHE_MS) return hit.value;
   const raw = await s.get(k);
-  const value = raw ? (JSON.parse(raw) as StockWidget) : null;
+  const value = raw ? normalize(JSON.parse(raw)) : null;
   cache.set(k, { at: Date.now(), value });
   return value;
 }
@@ -126,8 +137,13 @@ export async function listWidgets(): Promise<StockWidget[]> {
   const s = store();
   if (!s) return [];
   const paths = await s.list(PREFIX);
-  const all = await Promise.all(paths.map(async (p) => s.get(p).then((r) => (r ? (JSON.parse(r) as StockWidget) : null))));
+  const all = await Promise.all(paths.map(async (p) => s.get(p).then((r) => (r ? normalize(JSON.parse(r)) : null))));
   return all.filter((w): w is StockWidget => !!w).sort((a, b) => a.sku.localeCompare(b.sku));
+}
+
+/** Contadores guardados antes de existir el modo por ventas. */
+function normalize(w: StockWidget): StockWidget {
+  return { ...w, mode: w.mode ?? "sources", since: w.since ?? null, statuses: w.statuses ?? [] };
 }
 
 export class WidgetInputError extends Error {}
@@ -145,7 +161,20 @@ export function parseWidgetInput(body: unknown): Omit<StockWidget, "updatedAt" |
   if (!text) text = DEFAULT_WIDGET_TEXT;
   if (!text.includes("{n}")) throw new WidgetInputError("El texto debe incluir {n} donde va la cantidad");
   if (text.length > 120) throw new WidgetInputError("El texto es demasiado largo (máx. 120 caracteres)");
-  return { sku, initial, sources, text, showAtOrBelow, enabled: b.enabled !== false };
+  const mode: WidgetMode = b.mode === "orders" ? "orders" : "sources";
+  let since: string | null = null;
+  let statuses: string[] = [];
+  if (mode === "orders") {
+    const d = typeof b.since === "string" ? new Date(b.since) : null;
+    if (!d || Number.isNaN(d.getTime())) throw new WidgetInputError("Indica desde cuándo se cuentan las ventas (inicio de la campaña)");
+    since = d.toISOString();
+    statuses = (Array.isArray(b.statuses) ? b.statuses : [])
+      .filter((x): x is string => typeof x === "string")
+      .map((x) => x.trim().toLowerCase())
+      .filter((x) => /^[a-z0-9_]{1,32}$/.test(x));
+    if (!statuses.length) throw new WidgetInputError("Elige al menos un estado de pedido (p. ej. processing)");
+  }
+  return { sku, mode, since, statuses, initial, sources, text, showAtOrBelow, enabled: b.enabled !== false };
 }
 
 export async function saveWidget(input: Omit<StockWidget, "updatedAt" | "updatedBy">, user: string | null): Promise<StockWidget> {

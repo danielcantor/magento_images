@@ -83,3 +83,35 @@ export function remainingUnits(items: SourceItem[], sourceCodes: string[]): numb
   const total = pick.filter((i) => i.inStock).reduce((a, i) => a + i.quantity, 0);
   return Math.max(0, Math.floor(total));
 }
+
+// ---------------------------------------------------------------------------
+// Ventas: unidades vendidas de un SKU en pedidos.
+
+export interface OrderItemLite {
+  item_id?: number;
+  parent_item_id?: number | null;
+  sku: string;
+  qty_ordered?: number;
+  qty_canceled?: number;
+  qty_refunded?: number;
+}
+
+/**
+ * Unidades netas del SKU en un pedido (pedidas − canceladas − reembolsadas).
+ * En configurables, el padre y el hijo llevan el mismo SKU: se cuenta solo el padre.
+ */
+export function unitsInOrder(items: OrderItemLite[], sku: string): number {
+  const want = sku.trim().toLowerCase();
+  const matched = items.filter((i) => (i.sku ?? "").toLowerCase() === want);
+  const matchedIds = new Set(matched.map((i) => i.item_id).filter((x) => x != null));
+  return matched
+    .filter((i) => !(i.parent_item_id && matchedIds.has(i.parent_item_id)))
+    .reduce((a, i) => a + Math.max(0, (Number(i.qty_ordered) || 0) - (Number(i.qty_canceled) || 0) - (Number(i.qty_refunded) || 0)), 0);
+}
+
+/** Fecha ISO → formato de Magento en UTC ("YYYY-MM-DD HH:MM:SS"). */
+export function toMagentoDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) throw new Error("Fecha no válida");
+  return d.toISOString().slice(0, 19).replace("T", " ");
+}

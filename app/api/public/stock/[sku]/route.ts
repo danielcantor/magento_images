@@ -20,8 +20,9 @@ function reply(body: unknown, status: number, maxAge: number) {
     status,
     headers: {
       ...CORS,
-      // La CDN de Vercel guarda la respuesta: Magento recibe como mucho una consulta cada `maxAge` s por SKU.
-      "Cache-Control": `public, max-age=0, s-maxage=${maxAge}, stale-while-revalidate=600`,
+      // La CDN de Vercel guarda la respuesta `maxAge` s (y la sirve vieja otros `maxAge` s mientras la renueva):
+      // el número se actualiza en menos de un minuto y Magento recibe como mucho ~2 consultas por minuto por SKU.
+      "Cache-Control": `public, max-age=0, s-maxage=${maxAge}, stale-while-revalidate=${maxAge}`,
     },
   });
 }
@@ -33,7 +34,7 @@ export function OPTIONS() {
 export async function GET(_req: Request, ctx: { params: Promise<{ sku: string }> }) {
   const sku = decodeURIComponent((await ctx.params).sku).trim();
   const widget = await getWidget(sku, { cached: true }).catch(() => null);
-  if (!widget || !widget.enabled) return reply({ error: "Sin contador para este producto" }, 404, 300);
+  if (!widget || !widget.enabled) return reply({ error: "Sin contador para este producto" }, 404, 60);
 
   const token = process.env.MAGENTO_TOKEN;
   if (!token) return reply({ error: "Falta MAGENTO_TOKEN" }, 503, 60);
@@ -44,7 +45,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ sku: string }>
         ? Math.max(0, widget.initial - (await countSoldUnits(widget.sku, widget.since, widget.statuses, token)).units)
         : remainingUnits(await getSourceItems(widget.sku, token), widget.sources);
     const visible = quedan > 0 && (widget.showAtOrBelow === 0 || quedan <= widget.showAtOrBelow);
-    return reply({ sku: widget.sku, quedan, inicial: widget.initial, texto: widget.text, visible }, 200, 120);
+    return reply({ sku: widget.sku, quedan, inicial: widget.initial, texto: widget.text, visible }, 200, 30);
   } catch (e) {
     const msg = e instanceof MagentoError ? e.message : "Error consultando Magento";
     console.error("stock público", sku, msg);

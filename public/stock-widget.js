@@ -9,6 +9,8 @@
  *
  * Modo manual (un producto): <div data-stock-urgency data-sku="TU-SKU"></div> + el mismo <script>.
  *   El modo manual NO muestra el cupón (pensado para la home); para mostrarlo: data-cupon="si".
+ *   Al copiar el cupón se envía al dataLayer: { event: "copiar_cupon", item_name, item_id, coupon, copy_method }.
+ *   item_name sale del título de la ficha o de data-name="…" en el <div>.
  *   En la ficha (modo global) el cupón se muestra siempre que el contador tenga uno.
  * Si algo falla o no quedan unidades, no muestra nada.
  */
@@ -48,7 +50,7 @@
 
     el.appendChild(p);
     el.appendChild(track);
-    if (data.cupon && wantsCoupon(el)) el.appendChild(coupon(data.cupon, data.cuponTexto));
+    if (data.cupon && wantsCoupon(el)) el.appendChild(coupon(data.cupon, data.cuponTexto, { sku: data.sku, name: productName(el) }));
     setTimeout(function () {
       bar.style.width = pct + "%";
     }, 100);
@@ -83,7 +85,31 @@
     '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
 
   // Cupón: texto y el código en un recuadro punteado que es el botón de copiar (con ícono).
-  function coupon(code, label) {
+  // Nombre del producto para analytics: data-name del contador, si no el título de la ficha.
+  function productName(el) {
+    var n = el.getAttribute("data-name");
+    if (n) return n.trim();
+    var h = document.querySelector(".product-info-main .page-title .base") || document.querySelector(".page-title .base") || document.querySelector("h1");
+    return h ? h.textContent.trim() : "";
+  }
+
+  // Evento para Google Tag Manager / GA4 cada vez que alguien copia el cupón.
+  function track(code, product, method) {
+    try {
+      window.dataLayer = window.dataLayer || [];
+      window.dataLayer.push({
+        event: "copiar_cupon",
+        item_name: product.name || "",
+        item_id: product.sku || "",
+        coupon: code,
+        copy_method: method,
+      });
+    } catch (e) {
+      /* analytics nunca rompe el contador */
+    }
+  }
+
+  function coupon(code, label, product) {
     var row = document.createElement("div");
     row.style.cssText = "display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:12px;font-size:14px";
     var t = document.createElement("span");
@@ -112,6 +138,7 @@
     btn.addEventListener("click", function () {
       copy(code).then(
         function () {
+          track(code, product, "boton");
           icon.innerHTML = ICON_DONE;
           done.textContent = "¡Copiado!";
           clearTimeout(timer);
@@ -121,6 +148,7 @@
           }, 2000);
         },
         function () {
+          track(code, product, "seleccion_manual");
           // Sin portapapeles: se selecciona el código para copiarlo a mano.
           var r = document.createRange();
           r.selectNodeContents(txt);

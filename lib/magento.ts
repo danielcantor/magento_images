@@ -43,6 +43,10 @@ export function formatMagentoMessage(body: unknown): string | null {
   return message.replace(/%(\w+)/g, (m, k) => (k in params ? String(params[k]) : m));
 }
 
+/** Bloqueos de base de datos (Magento los traduce según el idioma del Admin). */
+export const DEADLOCK = /deadlock|lock wait timeout|bloqueo de base de datos/i;
+const DEADLOCK_RETRIES = 2;
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export const NO_PERMISSION_MESSAGE =
@@ -88,6 +92,7 @@ export async function magentoFetch<T>(
   const idempotent = method !== "POST";
   const timeoutMs = opts.timeoutMs ?? (method === "GET" ? 20_000 : 45_000);
 
+  let deadlocks = 0;
   for (let attempt = 0; ; attempt++) {
     let res: Response;
     let text: string;
@@ -136,6 +141,13 @@ export async function magentoFetch<T>(
         (res.status === 401
           ? "Magento rechazó el token (401). Revisá el token y la opción de Bearer tokens."
           : `Magento respondió ${res.status}`);
+      // Un deadlock deshace la transacción en Magento: reintentar es seguro, también en un POST.
+      if (DEADLOCK.test(msg) && deadlocks < DEADLOCK_RETRIES) {
+        deadlocks++;
+        attempt--;
+        await sleep(1000 * 2 ** deadlocks);
+        continue;
+      }
       throw new MagentoError(msg, res.status);
     }
     return body as T;
@@ -366,7 +378,7 @@ export async function addMedia(
     types?: string[];
   },
 ): Promise<number> {
-  const id = await magentoFetch<string | number>(`/products/${enc(sku)}/media`, {
+  const id = await explainOnSaveError(sku, () => magentoFetch<string | number>(`/products/${enc(sku)}/media`, {
     method: "POST",
     body: {
       entry: {
@@ -382,7 +394,7 @@ export async function addMedia(
         },
       },
     },
-  }, 1, { timeoutMs: 120_000 });
+  }, 1, { timeoutMs: 120_000 }), { onlySaveErrors: true });
   return Number(id);
 }
 
@@ -530,10 +542,14 @@ export async function explainSaveFailure(sku: string, magentoMessage: string): P
   }
   if (!links.length) return null;
   const check = analyzeLinks(sku, links, await existingSet(links.map((l) => l.linked_product_sku)));
-  const fix = "Usá «Reparar vínculos» o revisalos en el Admin (Productos relacionados, Up-sells y Cross-sells), guardá el producto y volvé a intentar.";
   if (check.missing.length) {
+    const fix = "Usá «Reparar vínculos» o revisalos en el Admin (Productos relacionados, Up-sells y Cross-sells), guardá el producto y volvé a intentar.";
     return `Magento no puede guardar este producto porque tiene productos vinculados que ya no existen (${formatMissingLinks(check.missing)}). ${fix}`;
   }
+  // Los vinculados existen: «Reparar vínculos» no quitaría nada. El error está en Magento.
+  const fix = check.checked
+    ? "Los vinculados existen, así que el problema está en alguno de ellos: guardá el producto desde el Admin para ver el error exacto o pasáselo a quien mantiene Magento."
+    : "Revisalos en el Admin (Productos relacionados, Up-sells y Cross-sells), guardá el producto y volvé a intentar.";
   return `Magento no puede volver a grabar los productos vinculados de este producto (${formatLinkCounts(check.byType)}). ${fix}`;
 }
 
@@ -578,14 +594,24 @@ export async function saveGallery(sku: string, changes: GalleryChange[]): Promis
   for (const c of changes) {
     if (!raw.some((e) => e.id === c.id)) throw new MagentoError("Una imagen ya no existe en Magento. Recargá el producto.", 404);
   }
-  try {
-    await magentoFetch(
+  await explainOnSaveError(sku, () =>
+    magentoFetch(
       `/products/${enc(sku)}`,
       { method: "PUT", body: { product: { sku, media_gallery_entries: buildGallery(raw, changes) } } },
       1,
       { store: "all", timeoutMs: 120_000 },
-    );
+    ),
+  );
+}
+
+/** Ejecuta un guardado del producto y, si Magento lo rechaza (4xx), explica el motivo. */
+async function explainOnSaveError<T>(sku: string, fn: () => Promise<T>, opts: { onlySaveErrors?: boolean } = {}): Promise<T> {
+  try {
+    return await fn();
   } catch (err) {
+    // Al subir una imagen, otros 4xx (formato, tamaño) se dejan tal cual.
+    const known = err instanceof MagentoError && (CANT_SAVE.test(err.message) || LINKS_INVALID.test(err.message));
+    if (opts.onlySaveErrors && !known) throw err;
     if (err instanceof MagentoError && err.status >= 400 && err.status < 500 && err.status !== 401 && err.status !== 403) {
       const explained = await explainSaveFailure(sku, err.message);
       throw new MagentoError(

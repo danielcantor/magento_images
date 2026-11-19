@@ -131,7 +131,12 @@ export default function SharedUploadView({ uploadMode = "direct", queue, syncSto
 
   async function start() {
     const desc = images.map((i) => `posición ${i.position}${i.types.length ? ` (${i.types.map(labelOf).join(", ")})` : ""}`).join("; ");
-    if (!confirm(`Se anexarán ${images.length} imagen(es) a ${valid.length} producto(s): ${desc}. Las imágenes existentes desde esa posición bajarán un puesto. ¿Continuar?`)) return;
+    // Caso visto en el historial: la imagen principal (Base) quedó en la posición 2 y la foto en la 1 con Hover.
+    const baseElsewhere = images.find((i) => i.types.includes("image") && i.position !== 1);
+    const warn = baseElsewhere
+      ? `\n\nAtención: «${baseElsewhere.file.name}» lleva el rol ${labelOf("image")} pero va en la posición ${baseElsewhere.position}. Será la imagen principal del producto aunque no esté primera. Revisá que no estén invertidos los roles.`
+      : "";
+    if (!confirm(`Se anexarán ${images.length} imagen(es) a ${valid.length} producto(s): ${desc}. Las imágenes existentes desde esa posición bajarán un puesto.${warn}\n\n¿Continuar?`)) return;
     await job.start(
       "varios-sku",
       (cb) => runSharedUpload(valid, images.map(({ file, position, types }) => ({ file, position, types })), cb, { uploadMode, queue, syncStores: syncStoresEnabled && syncStores }),

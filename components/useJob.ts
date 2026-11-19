@@ -33,6 +33,16 @@ export function useJob() {
     window.addEventListener("beforeunload", beforeUnload);
     const auditId = await auditStart(kind, { params: meta.params, skus: meta.skus, total: meta.skus?.length });
     let crashed = false;
+    let closed = false;
+    // Si la pestaña se cierra o recarga a mitad de camino, el registro se cierra como «detenido»
+    // con lo hecho hasta ahí (auditFinish usa keepalive para que el envío sobreviva al cierre).
+    const pageHide = () => {
+      if (closed) return;
+      closed = true;
+      const note: LogLine = { sku: "—", action: "detenido", status: "ok", message: "Se cerró o recargó la pestaña antes de terminar. Lo ya encolado se procesará igualmente en Magento." };
+      void auditFinish(auditId, { status: "detenido", ok: last.ok, failed: last.failed, total: last.total, lines: [...collected, note] });
+    };
+    window.addEventListener("pagehide", pageHide);
     try {
       await fn({
         signal: controller.signal,
@@ -52,6 +62,7 @@ export function useJob() {
       throw e;
     } finally {
       window.removeEventListener("beforeunload", beforeUnload);
+      window.removeEventListener("pagehide", pageHide);
       setRunning(false);
       setPhase(null);
       setCancelled(controller.signal.aborted);
@@ -59,10 +70,14 @@ export function useJob() {
         ? "error"
         : controller.signal.aborted
           ? "detenido"
-          : last.failed > 0
+          : // Una línea con error que no cuenta como paso (p. ej. «tiendas») también es un error.
+            last.failed > 0 || collected.some((l) => l.status === "error")
             ? "con-errores"
             : "completo";
-      void auditFinish(auditId, { status, ok: last.ok, failed: last.failed, total: last.total, lines: collected });
+      if (!closed) {
+        closed = true;
+        void auditFinish(auditId, { status, ok: last.ok, failed: last.failed, total: last.total, lines: collected });
+      }
     }
   }, []);
 

@@ -12,6 +12,12 @@ const statusClass: Record<AuditStatus, string> = {
   error: "err",
 };
 
+/** Un registro «en curso» de hace más de una hora quedó sin cerrar (pestaña cerrada o recargada). */
+const STALE_MS = 60 * 60 * 1000;
+const isStale = (a: AuditSummary) => a.status === "en-curso" && Date.now() - Date.parse(a.startedAt) > STALE_MS;
+const statusBadge = (a: AuditSummary) =>
+  isStale(a) ? <span className="badge warn">Interrumpido</span> : <span className={`badge ${statusClass[a.status]}`}>{AUDIT_STATUS_LABELS[a.status]}</span>;
+
 const fmtDate = (iso: string) =>
   new Date(iso).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
 
@@ -134,7 +140,7 @@ export default function HistoryView() {
                   <td>{AUDIT_KINDS[a.kind] ?? a.kind}</td>
                   <td className="small">{skusLabel(a)}</td>
                   <td>
-                    <span className={`badge ${statusClass[a.status]}`}>{AUDIT_STATUS_LABELS[a.status]}</span>{" "}
+                    {statusBadge(a)}{" "}
                     {a.status !== "en-curso" && (
                       <span className="muted small">
                         {a.ok} ok{a.failed ? ` · ${a.failed} con error` : ""}
@@ -189,7 +195,7 @@ function AuditDetail({ record: r, onClose }: { record: AuditRecord; onClose: () 
         </header>
         <div className="body stack">
           <div className="row">
-            <span className={`badge ${statusClass[r.status]}`}>{AUDIT_STATUS_LABELS[r.status]}</span>
+            {statusBadge(r)}
             <span className="badge ok">{r.ok} correctas</span>
             <span className={`badge ${r.failed ? "err" : ""}`}>{r.failed} con error</span>
             <span className="muted small">
@@ -202,7 +208,9 @@ function AuditDetail({ record: r, onClose }: { record: AuditRecord; onClose: () 
           </div>
           {r.status === "en-curso" && (
             <div className="alert info small">
-              Esta acción no se cerró: sigue en curso o la pestaña se cerró antes de terminar. Revisá los productos o Bulk Actions en Magento.
+              {isStale(r)
+                ? "Esta acción se interrumpió: la pestaña se cerró o recargó antes de terminar y no se sabe qué se aplicó. Revisá los productos o Bulk Actions en Magento antes de repetirla."
+                : "Esta acción no se cerró: sigue en curso o la pestaña se cerró antes de terminar. Revisá los productos o Bulk Actions en Magento."}
             </div>
           )}
           {params.length > 0 && (

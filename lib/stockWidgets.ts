@@ -27,12 +27,17 @@ export interface StockWidget {
   text: string;
   /** Solo se muestra si quedan esta cantidad o menos (0 = siempre). */
   showAtOrBelow: number;
+  /** Cupón de descuento que se muestra con botón «Copiar» (opcional). */
+  coupon: string | null;
+  /** Texto antes del cupón, p. ej. «Usá el cupón». */
+  couponText: string;
   enabled: boolean;
   updatedAt: string;
   updatedBy: string | null;
 }
 
 export const DEFAULT_WIDGET_TEXT = "¡Solo quedan {n} unidades!";
+export const DEFAULT_COUPON_TEXT = "Sumá un descuento extra con el cupón";
 
 interface Store {
   put(p: string, data: string): Promise<void>;
@@ -144,7 +149,7 @@ export async function listWidgets(): Promise<StockWidget[]> {
 
 /** Contadores guardados antes de existir el modo por ventas. */
 function normalize(w: StockWidget): StockWidget {
-  return { ...w, mode: w.mode ?? "sources", since: w.since ?? null, statuses: w.statuses ?? [] };
+  return { ...w, mode: w.mode ?? "sources", since: w.since ?? null, statuses: w.statuses ?? [], coupon: w.coupon ?? null, couponText: w.couponText ?? DEFAULT_COUPON_TEXT };
 }
 
 export class WidgetInputError extends Error {}
@@ -172,7 +177,14 @@ export function parseWidgetInput(body: unknown): Omit<StockWidget, "updatedAt" |
     statuses = cleanStatuses(Array.isArray(b.statuses) ? b.statuses : []);
     if (!statuses.length) throw new WidgetInputError("Elige al menos un estado de pedido (p. ej. processing)");
   }
-  return { sku, mode, since, statuses, initial, sources, text, showAtOrBelow, enabled: b.enabled !== false };
+  const rawCoupon = typeof b.coupon === "string" ? b.coupon.trim() : "";
+  if (rawCoupon && !/^[A-Za-z0-9_-]{1,40}$/.test(rawCoupon)) {
+    throw new WidgetInputError("El cupón solo puede tener letras, números, guiones y guiones bajos (máx. 40)");
+  }
+  let couponText = typeof b.couponText === "string" ? b.couponText.trim() : "";
+  if (!couponText) couponText = DEFAULT_COUPON_TEXT;
+  if (couponText.length > 80) throw new WidgetInputError("El texto del cupón es demasiado largo (máx. 80 caracteres)");
+  return { sku, mode, since, statuses, initial, sources, text, showAtOrBelow, coupon: rawCoupon || null, couponText, enabled: b.enabled !== false };
 }
 
 export async function saveWidget(input: Omit<StockWidget, "updatedAt" | "updatedBy">, user: string | null): Promise<StockWidget> {

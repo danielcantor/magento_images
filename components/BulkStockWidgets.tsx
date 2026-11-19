@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { api, auditStart, type StockWidgetDto } from "@/lib/api";
 import type { AuditLine } from "@/lib/auditKinds";
 import { DEFAULT_SALE_STATUSES } from "@/lib/stockDiagnosis";
+import CouponFields, { DEFAULT_COUPON_TEXT, confirmCoupon } from "./CouponFields";
 
 const DEFAULT_TEXT = "¡Solo quedan {n} unidades!";
 
@@ -32,6 +33,7 @@ export default function BulkStockWidgets({ skus, names, onClose }: { skus: strin
   const [text, setText] = useState(DEFAULT_TEXT);
   const [showAtOrBelow, setShowAtOrBelow] = useState(0);
   const [enabled, setEnabled] = useState(true);
+  const [coupon, setCoupon] = useState({ coupon: "", couponText: DEFAULT_COUPON_TEXT });
   const [replace, setReplace] = useState(false);
   const [all, setAll] = useState("");
   const [running, setRunning] = useState(false);
@@ -82,6 +84,7 @@ export default function BulkStockWidgets({ skus, names, onClose }: { skus: strin
   }
 
   async function create() {
+    if (!(await confirmCoupon(coupon.coupon))) return;
     if (replace && targets.some((r) => r.existing) && !confirm(`Se reemplazarán ${targets.filter((r) => r.existing).length} contador(es) existente(s). ¿Continuar?`)) return;
     setRunning(true);
     const lines: AuditLine[] = [];
@@ -95,6 +98,8 @@ export default function BulkStockWidgets({ skus, names, onClose }: { skus: strin
         sources: mode === "sources" ? sources : [],
         text,
         showAtOrBelow,
+        coupon: coupon.coupon || null,
+        couponText: coupon.couponText,
         enabled,
       };
       try {
@@ -112,7 +117,7 @@ export default function BulkStockWidgets({ skus, names, onClose }: { skus: strin
       "contadores-crear",
       {
         skus: targets.map((r) => r.sku),
-        params: { modo: mode === "orders" ? "ventas" : "stock del ERP", ...(mode === "orders" ? { desde: since, estados: statuses.join(", ") } : { fuentes: sources.join(", ") || "todas" }) },
+        params: { modo: mode === "orders" ? "ventas" : "stock del ERP", ...(coupon.coupon ? { cupon: coupon.coupon } : {}), ...(mode === "orders" ? { desde: since, estados: statuses.join(", ") } : { fuentes: sources.join(", ") || "todas" }) },
       },
       { status: ok === lines.length ? "completo" : ok ? "con-errores" : "error", ok, failed: lines.length - ok, total: lines.length, lines },
     );
@@ -195,6 +200,7 @@ export default function BulkStockWidgets({ skus, names, onClose }: { skus: strin
               </label>
             </div>
             {!textOk && <span className="small" style={{ color: "var(--err)" }}>El texto tiene que incluir {"{n}"}.</span>}
+            <CouponFields coupon={coupon.coupon} couponText={coupon.couponText} onChange={setCoupon} disabled={running || done} />
             <label className="check">
               <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} disabled={running || done} />
               Activos al crearlos (se muestran en la tienda)

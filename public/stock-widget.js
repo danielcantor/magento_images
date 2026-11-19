@@ -46,9 +46,75 @@
 
     el.appendChild(p);
     el.appendChild(track);
+    if (data.cupon) el.appendChild(coupon(data.cupon, data.cuponTexto));
     setTimeout(function () {
       bar.style.width = pct + "%";
     }, 100);
+  }
+
+  function copy(text) {
+    if (navigator.clipboard && window.isSecureContext) return navigator.clipboard.writeText(text);
+    return new Promise(function (resolve, reject) {
+      var t = document.createElement("textarea");
+      t.value = text;
+      t.setAttribute("readonly", "");
+      t.style.cssText = "position:fixed;top:0;left:0;opacity:0";
+      document.body.appendChild(t);
+      t.select();
+      try {
+        document.execCommand("copy") ? resolve() : reject();
+      } catch (e) {
+        reject(e);
+      }
+      document.body.removeChild(t);
+    });
+  }
+
+  // Cupón: texto, código en un recuadro punteado y botón «Copiar».
+  function coupon(code, label) {
+    var row = document.createElement("div");
+    row.style.cssText = "display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:12px;font-size:14px";
+    var t = document.createElement("span");
+    t.textContent = label || "Sumá un descuento extra con el cupón";
+    var box = document.createElement("span");
+    box.textContent = code;
+    box.style.cssText = "font-weight:700;letter-spacing:.06em;border:1.5px dashed #c0392b;color:#c0392b;border-radius:6px;padding:6px 10px;user-select:all";
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = "Copiar";
+    btn.setAttribute("aria-label", "Copiar el cupón " + code);
+    btn.style.cssText = "min-height:36px;padding:6px 14px;border-radius:6px;border:0;background:#c0392b;color:#fff;font:inherit;font-weight:600;cursor:pointer";
+    var live = document.createElement("span");
+    live.setAttribute("aria-live", "polite");
+    live.style.cssText = "position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)";
+    btn.addEventListener("click", function () {
+      copy(code).then(
+        function () {
+          btn.textContent = "¡Copiado!";
+          live.textContent = "Cupón " + code + " copiado";
+          setTimeout(function () {
+            btn.textContent = "Copiar";
+          }, 2000);
+        },
+        function () {
+          // Sin portapapeles: se selecciona el código para copiarlo a mano.
+          var r = document.createRange();
+          r.selectNodeContents(box);
+          var sel = window.getSelection();
+          sel.removeAllRanges();
+          sel.addRange(r);
+        },
+      );
+    });
+    // Código y botón siempre juntos: si no entran al lado del texto, bajan los dos.
+    var pair = document.createElement("span");
+    pair.style.cssText = "display:inline-flex;align-items:center;gap:8px;white-space:nowrap";
+    pair.appendChild(box);
+    pair.appendChild(btn);
+    row.appendChild(t);
+    row.appendChild(pair);
+    row.appendChild(live);
+    return row;
   }
 
   function load(el) {

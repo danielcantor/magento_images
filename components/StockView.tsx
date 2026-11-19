@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import { api, type StockWidgetDto } from "@/lib/api";
+import CouponFields, { DEFAULT_COUPON_TEXT, confirmCoupon } from "./CouponFields";
 import { DEFAULT_SALE_STATUSES, type StockReport, type StockRow } from "@/lib/stockDiagnosis";
 
 const DEFAULT_TEXT = "¡Solo quedan {n} unidades!";
@@ -97,6 +98,7 @@ export default function StockView() {
 
   async function save() {
     if (!form) return;
+    if (!(await confirmCoupon(form.coupon))) return;
     setSaving(true);
     setSaveMsg(null);
     try {
@@ -387,6 +389,12 @@ export default function StockView() {
                 <span className="muted small">Texto</span>
                 <input className="grow" type="text" value={form.text} onChange={(e) => setForm({ ...form, text: e.target.value })} />
               </label>
+              <CouponFields
+                coupon={form.coupon ?? ""}
+                couponText={form.couponText ?? DEFAULT_COUPON_TEXT}
+                onChange={(v) => setForm({ ...form, coupon: v.coupon || null, couponText: v.couponText })}
+                disabled={saving}
+              />
               <div className="row">
                 <button className="primary" onClick={save} disabled={saving}>
                   {saving ? "Guardando…" : "Guardar contador"}
@@ -454,6 +462,7 @@ export default function StockView() {
                     </td>
                     <td className="small">
                       {w.mode === "orders" ? `Ventas (${w.statuses.join(", ")}) desde ${new Date(w.since ?? "").toLocaleString("es-AR")}` : `Fuentes: ${w.sources.join(", ") || "todas"}`}
+                      {w.coupon && <> · cupón <code>{w.coupon}</code></>}
                     </td>
                     <td>{w.initial}</td>
                     <td>{w.enabled ? <span className="badge ok">Activo</span> : <span className="badge">Pausado</span>}</td>

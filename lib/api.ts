@@ -3,6 +3,13 @@ import type { AuditLine, AuditRecord, AuditStatus, AuditSummary } from "./auditK
 import type { MediaEntry, MediaRole, ProductSearchResult, Website } from "./types";
 import type { StockReport } from "./stockDiagnosis";
 
+export interface CouponCheck {
+  /** "ok" | "missing" (no existe) | "inactive" | "expired" | "unknown" (no se pudo verificar) */
+  state: "ok" | "missing" | "inactive" | "expired" | "unknown";
+  rule?: string;
+  message?: string;
+}
+
 export interface StockWidgetDto {
   sku: string;
   mode: "sources" | "orders";
@@ -12,6 +19,8 @@ export interface StockWidgetDto {
   sources: string[];
   text: string;
   showAtOrBelow: number;
+  coupon?: string | null;
+  couponText?: string;
   enabled: boolean;
   updatedAt?: string;
   updatedBy?: string | null;
@@ -69,6 +78,7 @@ export const api = {
     request<{ items: Record<string, { sourceCode: string; quantity: number; inStock: boolean }[]> }>(
       `/api/stock/sources?skus=${enc(skus.join(","))}`,
     ),
+  checkCoupon: (code: string) => request<CouponCheck>(`/api/stock/coupon?code=${enc(code)}`),
   deleteStockWidget: (sku: string) => request<{ ok: true }>(`/api/stock/widgets?sku=${enc(sku)}`, { method: "DELETE" }),
 
   searchProducts: (f: { q: string; page: number; pageSize?: number; status?: string; website?: string; store?: string; noBase?: boolean }) => {

@@ -23,6 +23,8 @@ function toLocalInput(iso: string): string {
 export default function BulkStockWidgets({ skus, names, onClose }: { skus: string[]; names: Record<string, string>; onClose: () => void }) {
   const [rows, setRows] = useState<Row[]>(skus.map((sku) => ({ sku, name: names[sku], stock: null, initial: "", existing: false })));
   const [sourceCodes, setSourceCodes] = useState<string[]>([]);
+  const [codesWithUnits, setCodesWithUnits] = useState<string[]>([]);
+  const [allSources, setAllSources] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -56,6 +58,7 @@ export default function BulkStockWidgets({ skus, names, onClose }: { skus: strin
         );
         setSourceCodes([...codes].sort());
         setSources([...withUnits].sort());
+        setCodesWithUnits([...withUnits]);
         setRows((rs) =>
           rs.map((r) => {
             const stock = Math.max(0, Math.floor((src.items[r.sku] ?? []).filter((i) => i.inStock).reduce((a, i) => a + i.quantity, 0)));
@@ -175,7 +178,7 @@ export default function BulkStockWidgets({ skus, names, onClose }: { skus: strin
                 <span className="small">Fuentes que se suman</span>
                 <div className="row" style={{ marginTop: 6 }}>
                   {sourceCodes.length === 0 && <span className="muted small">{loading ? "Cargando fuentes…" : "Los productos no tienen fuentes asignadas."}</span>}
-                  {sourceCodes.map((c) => (
+                  {sourceCodes.filter((c) => allSources || codesWithUnits.includes(c) || sources.includes(c)).map((c) => (
                     <label key={c} className="check">
                       <input
                         type="checkbox"
@@ -186,6 +189,11 @@ export default function BulkStockWidgets({ skus, names, onClose }: { skus: strin
                       {c}
                     </label>
                   ))}
+                  {sourceCodes.length > codesWithUnits.length && (
+                    <button type="button" className="link small" onClick={() => setAllSources((v) => !v)}>
+                      {allSources ? "Ocultar las que no tienen stock" : `Ver ${sourceCodes.filter((c) => !codesWithUnits.includes(c) && !sources.includes(c)).length} sin stock`}
+                    </button>
+                  )}
                 </div>
               </div>
             )}

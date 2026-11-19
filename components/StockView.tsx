@@ -41,6 +41,7 @@ export default function StockView() {
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
   const [pub, setPub] = useState<PublicResult | null>(null);
   const [origin, setOrigin] = useState("");
+  const [allSources, setAllSources] = useState(false);
   const [sales, setSales] = useState<SalesPreview | null>(null);
   const [salesLoading, setSalesLoading] = useState(false);
   const [salesError, setSalesError] = useState<string | null>(null);
@@ -148,11 +149,15 @@ export default function StockView() {
   const toggleSource = (code: string) =>
     form && setForm({ ...form, sources: form.sources.includes(code) ? form.sources.filter((c) => c !== code) : [...form.sources, code] });
 
+  const sortedSources = report ? [...report.sources].sort((a, b) => b.quantity - a.quantity || a.sourceCode.localeCompare(b.sourceCode)) : [];
+  const sourcesWithStock = sortedSources.filter((s) => s.inStock && s.quantity > 0);
+  const hiddenSources = form ? sortedSources.filter((s) => !(s.inStock && s.quantity > 0) && !form.sources.includes(s.sourceCode)).length : 0;
+
   const selectedUnits = report && form ? report.sources.filter((x) => x.inStock && (form.sources.length === 0 || form.sources.includes(x.sourceCode))).reduce((a, x) => a + x.quantity, 0) : 0;
 
   return (
     <div className="stack">
-      <h1>Stock y contador de unidades</h1>
+      <h1>Contadores de stock</h1>
 
       <div className="card">
         <form
@@ -189,8 +194,15 @@ export default function StockView() {
             <div className="alert info">Sin problemas: la cantidad vendible coincide con las fuentes.</div>
           )}
 
-          <div className="card">
-            <h2>Fuentes</h2>
+          {/* Plegada por defecto: un SKU puede tener decenas de fuentes. */}
+          <details className="card collapsible">
+            <summary>
+              <h2>Fuentes</h2>
+              <span className="muted small">
+                {report.sources.length} fuente{report.sources.length === 1 ? "" : "s"} · {sourcesWithStock.length} con stock ·{" "}
+                {Math.floor(report.sources.filter((x) => x.inStock).reduce((a, x) => a + x.quantity, 0))} unidades
+              </span>
+            </summary>
             {report.sources.length === 0 ? (
               <p className="muted">El SKU no tiene fuentes asignadas (o no existe).</p>
             ) : (
@@ -205,7 +217,7 @@ export default function StockView() {
                     </tr>
                   </thead>
                   <tbody>
-                    {report.sources.map((s) => (
+                    {sortedSources.map((s) => (
                       <tr key={s.sourceCode}>
                         <td>
                           <code>{s.sourceCode}</code>
@@ -222,7 +234,7 @@ export default function StockView() {
                 </table>
               </div>
             )}
-          </div>
+          </details>
 
           <div className="card">
             <h2>Stocks (lo que ve cada web)</h2>
@@ -360,12 +372,19 @@ export default function StockView() {
               <div>
                 <b className="small">Fuentes que se suman</b>
                 <div className="row" style={{ marginTop: 6 }}>
-                  {report.sources.map((s) => (
-                    <label key={s.sourceCode} className="check">
-                      <input type="checkbox" checked={form.sources.includes(s.sourceCode)} onChange={() => toggleSource(s.sourceCode)} />
-                      {s.sourceCode} ({s.quantity})
-                    </label>
-                  ))}
+                  {sortedSources
+                    .filter((s) => allSources || (s.inStock && s.quantity > 0) || form.sources.includes(s.sourceCode))
+                    .map((s) => (
+                      <label key={s.sourceCode} className="check">
+                        <input type="checkbox" checked={form.sources.includes(s.sourceCode)} onChange={() => toggleSource(s.sourceCode)} />
+                        {s.sourceCode} ({s.quantity})
+                      </label>
+                    ))}
+                  {hiddenSources > 0 && (
+                    <button type="button" className="link small" onClick={() => setAllSources((v) => !v)}>
+                      {allSources ? "Ocultar las que no tienen stock" : `Ver ${hiddenSources} sin stock`}
+                    </button>
+                  )}
                 </div>
                 <p className="muted small">Ahora mostraría: <b>{Math.max(0, Math.floor(selectedUnits))}</b> {form.sources.length === 0 && "(sin elegir = todas)"}</p>
               </div>

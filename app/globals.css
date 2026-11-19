@@ -378,3 +378,19 @@ label.select-page { display: none; }
   .drawer footer .bw-skips { text-align: left; }
   .bw-name { max-width: 180px; }
 }
+
+/* ---------- Bloques plegables ---------- */
+details.collapsible > summary {
+  display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; cursor: pointer; list-style: none;
+  margin: -20px; padding: 20px; border-radius: var(--radius);
+}
+details.collapsible > summary::-webkit-details-marker { display: none; }
+details.collapsible > summary h2 { margin: 0; }
+details.collapsible > summary::before {
+  content: "▸"; color: var(--sc-violet); font-size: 14px; transition: transform .15s; display: inline-block;
+}
+details.collapsible[open] > summary::before { transform: rotate(90deg); }
+details.collapsible[open] > summary { margin-bottom: 0; padding-bottom: 12px; }
+details.collapsible > summary:hover h2 { text-decoration: underline; }
+details.collapsible > summary:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+@media (prefers-reduced-motion: reduce) { details.collapsible > summary::before { transition: none; } }

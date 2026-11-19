@@ -12,7 +12,7 @@ export default function Nav({ mode, username, auditEnabled = false }: { mode: Au
     { href: "/products", label: "Productos" },
     { href: "/bulk", label: "Subida masiva" },
     { href: "/shared", label: "Imagen a varios SKU" },
-    { href: "/stock", label: "Stock" },
+    { href: "/stock", label: "Contadores" },
     ...(auditEnabled ? [{ href: "/history", label: "Historial" }] : []),
   ];
   const current = links.find((l) => path.startsWith(l.href));

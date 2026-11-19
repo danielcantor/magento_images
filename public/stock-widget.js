@@ -70,50 +70,67 @@
     });
   }
 
-  // Cupón: texto, código en un recuadro punteado y botón «Copiar».
+  var ICON_COPY =
+    '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg>';
+  var ICON_DONE =
+    '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
+
+  // Cupón: texto y el código en un recuadro punteado que es el botón de copiar (con ícono).
   function coupon(code, label) {
     var row = document.createElement("div");
     row.style.cssText = "display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:12px;font-size:14px";
     var t = document.createElement("span");
     t.textContent = label || "Sumá un descuento extra con el cupón";
-    var box = document.createElement("span");
-    box.textContent = code;
-    box.style.cssText = "font-weight:700;letter-spacing:.06em;border:1.5px dashed #c0392b;color:#c0392b;border-radius:6px;padding:6px 10px;user-select:all";
+
     var btn = document.createElement("button");
     btn.type = "button";
-    btn.textContent = "Copiar";
+    btn.title = "Copiar cupón";
     btn.setAttribute("aria-label", "Copiar el cupón " + code);
-    btn.style.cssText = "min-height:36px;padding:6px 14px;border-radius:6px;border:0;background:#c0392b;color:#fff;font:inherit;font-weight:600;cursor:pointer";
-    var live = document.createElement("span");
-    live.setAttribute("aria-live", "polite");
-    live.style.cssText = "position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)";
+    btn.style.cssText =
+      "display:inline-flex;align-items:center;gap:10px;min-height:40px;padding:6px 10px 6px 12px;border:1.5px dashed #c0392b;" +
+      "border-radius:6px;background:#fff;color:#c0392b;font:inherit;font-weight:700;letter-spacing:.06em;cursor:pointer";
+    var txt = document.createElement("span");
+    txt.textContent = code;
+    var icon = document.createElement("span");
+    icon.style.cssText = "display:inline-flex;padding-left:10px;border-left:1px solid rgba(192,57,43,.35)";
+    icon.innerHTML = ICON_COPY;
+    btn.appendChild(txt);
+    btn.appendChild(icon);
+
+    var done = document.createElement("span");
+    done.setAttribute("aria-live", "polite");
+    done.style.cssText = "font-size:13px;font-weight:600;color:#1e7b34";
+
+    var timer;
     btn.addEventListener("click", function () {
       copy(code).then(
         function () {
-          btn.textContent = "¡Copiado!";
-          live.textContent = "Cupón " + code + " copiado";
-          setTimeout(function () {
-            btn.textContent = "Copiar";
+          icon.innerHTML = ICON_DONE;
+          done.textContent = "¡Copiado!";
+          clearTimeout(timer);
+          timer = setTimeout(function () {
+            icon.innerHTML = ICON_COPY;
+            done.textContent = "";
           }, 2000);
         },
         function () {
           // Sin portapapeles: se selecciona el código para copiarlo a mano.
           var r = document.createRange();
-          r.selectNodeContents(box);
+          r.selectNodeContents(txt);
           var sel = window.getSelection();
           sel.removeAllRanges();
           sel.addRange(r);
         },
       );
     });
-    // Código y botón siempre juntos: si no entran al lado del texto, bajan los dos.
+
+    // Recuadro y aviso juntos: si no entran al lado del texto, bajan los dos.
     var pair = document.createElement("span");
-    pair.style.cssText = "display:inline-flex;align-items:center;gap:8px;white-space:nowrap";
-    pair.appendChild(box);
+    pair.style.cssText = "display:inline-flex;align-items:center;gap:10px;white-space:nowrap";
     pair.appendChild(btn);
+    pair.appendChild(done);
     row.appendChild(t);
     row.appendChild(pair);
-    row.appendChild(live);
     return row;
   }
 

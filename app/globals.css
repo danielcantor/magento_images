@@ -162,7 +162,7 @@ button.danger { color: var(--err); border-color: var(--err); background: transpa
 button.danger:hover:not(:disabled) { background: var(--err-bg); color: var(--err); border-color: var(--err); }
 button.link { border: none; background: none; padding: 0; color: var(--heading); font-weight: 600; border-radius: 4px; }
 button.link:hover:not(:disabled) { text-decoration: underline; }
-input[type="text"], input[type="search"], input[type="password"], input[type="email"], input[type="number"], select, textarea {
+input[type="text"], input[type="search"], input[type="password"], input[type="email"], input[type="number"], input[type="datetime-local"], select, textarea {
   font: inherit; padding: 9px 12px; border-radius: var(--radius-sm);
   border: 1.5px solid var(--border); background: var(--surface); color: var(--text);
 }
@@ -364,4 +364,17 @@ label.select-page { display: none; }
   .pager .spacer { display: none; }
   .bulkbar { bottom: 8px; padding: 10px 12px; gap: 8px; }
   .bulkbar b { flex-basis: 100%; }
+}
+
+/* ---------- Contadores en lote ---------- */
+.form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.form-grid label { display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; color: var(--muted); }
+.form-grid input { width: 100%; }
+.bulk-widgets-table td { vertical-align: middle; }
+.bw-name { max-width: 340px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.drawer footer .bw-skips { flex-basis: 100%; text-align: right; }
+@media (max-width: 640px) {
+  .drawer footer .primary { flex: 1 1 100%; min-height: 44px; }
+  .drawer footer .bw-skips { text-align: left; }
+  .bw-name { max-width: 180px; }
 }

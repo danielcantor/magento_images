@@ -6,6 +6,7 @@ import { api } from "@/lib/api";
 import { runBulkDelete, runLinkCheck, runLinkRepair, runStoreSync } from "@/lib/bulk";
 import { PAGE_SIZES, type ProductRow, type Website } from "@/lib/types";
 import MediaEditor from "./MediaEditor";
+import BulkStockWidgets from "./BulkStockWidgets";
 import { SkeletonRows } from "./Skeleton";
 import JobProgress from "./JobProgress";
 import { useJob } from "./useJob";
@@ -55,6 +56,9 @@ export default function ProductsView({ syncStoresEnabled = false }: { syncStores
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [editing, setEditing] = useState<ProductRow | null>(null);
+  const [counters, setCounters] = useState<string[] | null>(null);
+  /** Nombres de los productos vistos, para mostrarlos en paneles de acciones masivas. */
+  const [names, setNames] = useState<Record<string, string>>({});
   const job = useJob();
   const router = useRouter();
 
@@ -109,6 +113,7 @@ export default function ProductsView({ syncStoresEnabled = false }: { syncStores
         noBase: filters.img === "nobase",
       });
       setRows(r.items);
+      setNames((n) => ({ ...n, ...Object.fromEntries(r.items.map((p) => [p.sku, p.name])) }));
       setTotal(r.total);
       setLoadedKey(key);
     } catch (e) {
@@ -385,6 +390,9 @@ export default function ProductsView({ syncStoresEnabled = false }: { syncStores
           <button className="accent" onClick={attachToSelected} disabled={job.running}>
             Anexar imagen…
           </button>
+          <button onClick={() => setCounters([...selected])} disabled={job.running || selected.size > 200} title={selected.size > 200 ? "Máximo 200 productos a la vez" : "Crea contadores «Quedan X unidades» para la tienda"}>
+            Contador de stock…
+          </button>
           {syncStoresEnabled && (
             <button onClick={bulkSyncStores} disabled={job.running} title="Copia los valores generales de las imágenes en cada store view">
               Igualar tiendas
@@ -404,6 +412,8 @@ export default function ProductsView({ syncStoresEnabled = false }: { syncStores
           </button>
         </div>
       )}
+
+      {counters && <BulkStockWidgets skus={counters} names={names} onClose={() => setCounters(null)} />}
 
       {editing && (
         <MediaEditor

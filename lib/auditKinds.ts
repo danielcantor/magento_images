@@ -13,6 +13,7 @@ export const AUDIT_KINDS = {
   "editor-igualar": "Editor: igualar tiendas",
   "revisar-vinculos": "Revisar productos vinculados",
   "reparar-vinculos": "Reparar productos vinculados",
+  "contadores-crear": "Crear contadores de stock",
 } as const;
 
 export type AuditKind = keyof typeof AUDIT_KINDS;

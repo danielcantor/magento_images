@@ -65,6 +65,10 @@ export const api = {
       "/api/stock/widgets/preview",
       json("POST", w),
     ),
+  stockSources: (skus: string[]) =>
+    request<{ items: Record<string, { sourceCode: string; quantity: number; inStock: boolean }[]> }>(
+      `/api/stock/sources?skus=${enc(skus.join(","))}`,
+    ),
   deleteStockWidget: (sku: string) => request<{ ok: true }>(`/api/stock/widgets?sku=${enc(sku)}`, { method: "DELETE" }),
 
   searchProducts: (f: { q: string; page: number; pageSize?: number; status?: string; website?: string; store?: string; noBase?: boolean }) => {

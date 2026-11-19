@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { diagnoseStock, remainingUnits } from "@/lib/stockDiagnosis";
 import { memoryStore, parseWidgetInput, saveWidget, setWidgetStoreForTests } from "@/lib/stockWidgets";
-import { getSourceItems } from "@/lib/stock";
+import { getSourceItems, getSourceItemsMany } from "@/lib/stock";
 
 // Caso real: 50 unidades en RM (ERP), Sommier Stock con −1496 vendibles.
 const sources = [
@@ -85,6 +85,31 @@ describe("getSourceItems", () => {
       vi.fn().mockResolvedValue(new Response(JSON.stringify({ items: [{ sku: "A", source_code: "RM", quantity: 2, status: 1 }, { sku: "AB", source_code: "RM", quantity: 9, status: 1 }] }))),
     );
     expect(await getSourceItems("a", "t")).toEqual([{ sourceCode: "RM", quantity: 2, inStock: true }]);
+    vi.unstubAllGlobals();
+  });
+});
+
+describe("getSourceItemsMany", () => {
+  it("una sola consulta con condición in y agrupa por SKU (sin distinguir mayúsculas)", async () => {
+    process.env.MAGENTO_BASE_URL = "https://shop.test";
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ items: [
+        { sku: "a1", source_code: "RM", quantity: 5, status: 1 },
+        { sku: "B2", source_code: "RM", quantity: 0, status: 0 },
+        { sku: "zz", source_code: "RM", quantity: 9, status: 1 },
+      ] })),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const r = await getSourceItemsMany(["A1", "B2", "C3"], "t");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const q = new URL(fetchMock.mock.calls[0][0]).searchParams;
+    expect(q.get("searchCriteria[filter_groups][0][filters][0][value]")).toBe("A1,B2,C3");
+    expect(q.get("searchCriteria[filter_groups][0][filters][0][condition_type]")).toBe("in");
+    expect(r).toEqual({
+      A1: [{ sourceCode: "RM", quantity: 5, inStock: true }],
+      B2: [{ sourceCode: "RM", quantity: 0, inStock: false }],
+      C3: [],
+    });
     vi.unstubAllGlobals();
   });
 });

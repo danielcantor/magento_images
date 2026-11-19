@@ -31,6 +31,26 @@ export async function getSourceItems(sku: string, token?: string): Promise<Sourc
     .map((i) => ({ sourceCode: i.source_code, quantity: Number(i.quantity) || 0, inStock: Number(i.status) === 1 }));
 }
 
+/** Cantidades por fuente de varios SKU en una sola consulta (máx. 200). */
+export async function getSourceItemsMany(skus: string[], token?: string): Promise<Record<string, SourceItem[]>> {
+  const out: Record<string, SourceItem[]> = {};
+  const byLower = new Map(skus.map((s) => [s.toLowerCase(), s]));
+  skus.forEach((s) => (out[s] = []));
+  if (!skus.length) return out;
+  const p = new URLSearchParams({
+    "searchCriteria[filter_groups][0][filters][0][field]": "sku",
+    "searchCriteria[filter_groups][0][filters][0][value]": skus.join(","),
+    "searchCriteria[filter_groups][0][filters][0][condition_type]": "in",
+    "searchCriteria[pageSize]": "2000",
+  });
+  const r = await magentoFetch<{ items: RawSourceItem[] }>(`/inventory/source-items?${p}`, {}, 2, { token });
+  for (const i of r.items ?? []) {
+    const key = byLower.get(i.sku.toLowerCase());
+    if (key) out[key].push({ sourceCode: i.source_code, quantity: Number(i.quantity) || 0, inStock: Number(i.status) === 1 });
+  }
+  return out;
+}
+
 interface RawStock {
   stock_id: number;
   name: string;

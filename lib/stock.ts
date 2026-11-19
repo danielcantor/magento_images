@@ -51,6 +51,43 @@ export async function getSourceItemsMany(skus: string[], token?: string): Promis
   return out;
 }
 
+/** ID de producto de cada SKU (para reconocer las cards de los listados). Caché de 10 minutos. */
+const idCache = new Map<string, { at: number; id: number | null }>();
+export async function getProductIds(skus: string[], token?: string): Promise<Record<string, number>> {
+  const now = Date.now();
+  const out: Record<string, number> = {};
+  const missing = skus.filter((s) => {
+    const hit = idCache.get(s.toLowerCase());
+    if (hit && now - hit.at < 10 * 60 * 1000) {
+      if (hit.id) out[s] = hit.id;
+      return false;
+    }
+    return true;
+  });
+  if (missing.length) {
+    const p = new URLSearchParams({
+      "searchCriteria[filter_groups][0][filters][0][field]": "sku",
+      "searchCriteria[filter_groups][0][filters][0][value]": missing.join(","),
+      "searchCriteria[filter_groups][0][filters][0][condition_type]": "in",
+      "searchCriteria[pageSize]": "500",
+      fields: "items[id,sku]",
+    });
+    const r = await magentoFetch<{ items?: { id: number; sku: string }[] | null }>(`/products?${p}`, {}, 2, { token });
+    const found = new Map((r.items ?? []).map((i) => [i.sku.toLowerCase(), i.id]));
+    for (const s of missing) {
+      const id = found.get(s.toLowerCase()) ?? null;
+      idCache.set(s.toLowerCase(), { at: now, id });
+      if (id) out[s] = id;
+    }
+  }
+  return out;
+}
+
+/** Solo para tests. */
+export function clearProductIdCache() {
+  idCache.clear();
+}
+
 interface RawStock {
   stock_id: number;
   name: string;

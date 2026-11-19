@@ -113,3 +113,20 @@ describe("getSourceItemsMany", () => {
     vi.unstubAllGlobals();
   });
 });
+
+describe("getProductIds", () => {
+  it("resuelve el ID de cada SKU en una consulta y lo guarda en caché", async () => {
+    const { getProductIds, clearProductIdCache } = await import("@/lib/stock");
+    clearProductIdCache();
+    process.env.MAGENTO_BASE_URL = "https://shop.test";
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ items: [{ id: 4068, sku: "186003" }] })));
+    vi.stubGlobal("fetch", fetchMock);
+    expect(await getProductIds(["186003", "NOEXISTE"], "t")).toEqual({ "186003": 4068 });
+    const q = new URL(fetchMock.mock.calls[0][0]).searchParams;
+    expect(q.get("searchCriteria[filter_groups][0][filters][0][condition_type]")).toBe("in");
+    expect(q.get("fields")).toBe("items[id,sku]");
+    expect(await getProductIds(["186003"], "t")).toEqual({ "186003": 4068 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    vi.unstubAllGlobals();
+  });
+});

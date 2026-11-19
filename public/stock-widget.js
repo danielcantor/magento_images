@@ -15,6 +15,9 @@
  *     - copiar_cupon: { item_name, item_id, coupon, copy_method: "boton" | "seleccion_manual", placement }
  *   item_name sale del título de la ficha o de data-name="…" en el <div>.
  *   En la ficha (modo global) el cupón se muestra siempre que el contador tenga uno.
+ * Listados (categorías, buscador, carruseles): el mismo script agrega una versión compacta del
+ *   contador en cada card de un producto con contador activo, entre el nombre y las estrellas.
+ *   Sin cupón. Para desactivarlo: data-cards="off" en el <script>. Analytics: placement "listado".
  * Si algo falla o no quedan unidades, no muestra nada.
  */
 (function () {
@@ -35,10 +38,11 @@
     var pct = 50 + sold * 50;
     var parts = String(data.texto || "¡Solo quedan {n} unidades!").split("{n}");
 
+    var card = el.getAttribute("data-variant") === "card";
     el.innerHTML = "";
-    el.style.cssText = "margin:40px 0;font-family:inherit";
+    el.style.cssText = card ? "margin:6px 0 8px;font-family:inherit" : "margin:40px 0;font-family:inherit";
     var p = document.createElement("p");
-    p.style.cssText = "margin:0 0 6px;font-weight:600;color:#c0392b";
+    p.style.cssText = card ? "margin:0 0 4px;font-weight:600;font-size:12.5px;line-height:1.3;color:#c0392b" : "margin:0 0 6px;font-weight:600;color:#c0392b";
     p.appendChild(document.createTextNode("🔥 " + parts[0]));
     var b = document.createElement("b");
     b.textContent = String(n);
@@ -46,7 +50,7 @@
     p.appendChild(document.createTextNode(parts.slice(1).join(String(n))));
 
     var track = document.createElement("div");
-    track.style.cssText = "background:#eee;border-radius:6px;height:10px;overflow:hidden";
+    track.style.cssText = "background:#eee;border-radius:6px;overflow:hidden;height:" + (card ? "6px" : "10px");
     var bar = document.createElement("div");
     bar.style.cssText = "height:100%;width:0;background:#e74c3c;transition:width .8s";
     track.appendChild(bar);
@@ -211,15 +215,52 @@
     return row;
   }
 
+  var stockCache = {};
+  function stockOf(base, sku) {
+    var k = base + "|" + sku.toLowerCase();
+    if (!stockCache[k]) {
+      stockCache[k] = fetch(base + "/api/public/stock/" + encodeURIComponent(sku))
+        .then(function (r) {
+          return r.ok ? r.json() : null;
+        })
+        .catch(function () {
+          return null;
+        });
+    }
+    return stockCache[k];
+  }
+
+  var activePromise;
+  function activeList() {
+    if (!activePromise) {
+      activePromise = fetch(origin + "/api/public/stock-active")
+        .then(function (r) {
+          return r.ok ? r.json() : null;
+        })
+        .then(function (d) {
+          var items = (d && d.items) || ((d && d.skus) || []).map(function (s) {
+            return { sku: s, id: null };
+          });
+          var bySku = {}, byId = {};
+          for (var i = 0; i < items.length; i++) {
+            bySku[String(items[i].sku).toLowerCase()] = items[i].sku;
+            if (items[i].id) byId[String(items[i].id)] = items[i].sku;
+          }
+          return { count: items.length, bySku: bySku, byId: byId };
+        })
+        .catch(function () {
+          return { count: 0, bySku: {}, byId: {} };
+        });
+    }
+    return activePromise;
+  }
+
   function load(el) {
     var sku = el.getAttribute("data-sku");
     var base = el.getAttribute("data-endpoint") || origin;
     if (!sku || !base) return;
     el.style.display = "none";
-    fetch(base + "/api/public/stock/" + encodeURIComponent(sku))
-      .then(function (r) {
-        return r.ok ? r.json() : null;
-      })
+    stockOf(base, sku)
       .then(function (data) {
         if (!data || !data.visible || !(data.quedan > 0)) return;
         render(el, data);
@@ -282,27 +323,72 @@
     if (!attr("data-sku-selector") && !document.body.classList.contains("catalog-product-view")) return;
     var sku = readSku();
     if (!sku || !origin) return;
-    fetch(origin + "/api/public/stock-active")
-      .then(function (r) {
-        return r.ok ? r.json() : null;
-      })
-      .then(function (data) {
-        var skus = (data && data.skus) || [];
-        var want = sku.toLowerCase();
-        for (var i = 0; i < skus.length; i++) {
-          if (String(skus[i]).toLowerCase() === want) {
-            var el = placeholder();
-            if (el) {
-              el.setAttribute("data-sku", skus[i]);
-              el.setAttribute("data-cupon", "si");
-              el.setAttribute("data-placement", "ficha");
-              load(el);
-            }
-            return;
-          }
-        }
-      })
-      .catch(function () {});
+    activeList().then(function (active) {
+      var match = active.bySku[sku.toLowerCase()];
+      if (!match) return;
+      var el = placeholder();
+      if (!el) return;
+      el.setAttribute("data-sku", match);
+      el.setAttribute("data-cupon", "si");
+      el.setAttribute("data-placement", "ficha");
+      load(el);
+    });
+  }
+
+  // ---------- Cards de listados ----------
+
+  function cardSku(card, active) {
+    var s = card.querySelector("[data-product-sku]");
+    if (s) {
+      var bySku = active.bySku[String(s.getAttribute("data-product-sku")).toLowerCase()];
+      if (bySku) return bySku;
+    }
+    var idEl = card.querySelector("[data-product-id]");
+    var id = idEl ? idEl.getAttribute("data-product-id") : null;
+    if (!id) {
+      var pb = card.querySelector('[data-price-box^="product-id-"]');
+      id = pb ? pb.getAttribute("data-price-box").replace("product-id-", "") : null;
+    }
+    return id ? active.byId[id] || null : null;
+  }
+
+  function cards() {
+    if (attr("data-cards") === "off" || !origin) return;
+    activeList().then(function (active) {
+      if (!active.count) return;
+      var list = document.querySelectorAll(".product-item:not([data-stock-card])");
+      for (var i = 0; i < list.length; i++) {
+        var card = list[i];
+        card.setAttribute("data-stock-card", "");
+        var sku = cardSku(card, active);
+        if (!sku) continue;
+        var nameEl = card.querySelector(".product-item-name");
+        if (!nameEl) continue;
+        var el = document.createElement("div");
+        el.setAttribute("data-stock-urgency", "");
+        el.setAttribute("data-sku", sku);
+        el.setAttribute("data-variant", "card");
+        el.setAttribute("data-placement", "listado");
+        el.setAttribute("data-name", nameEl.textContent.trim());
+        // Entre el nombre y las estrellas; sin estrellas, justo debajo del nombre.
+        // Tema SommierCenter: .product-rating envuelve la nota («4.7») y las estrellas.
+        var stars = card.querySelector(".product-item-details .product-rating") || card.querySelector(".product-reviews-summary");
+        var after = nameEl.closest(".name-box") || nameEl;
+        if (stars && stars.parentNode) stars.parentNode.insertBefore(el, stars);
+        else after.parentNode.insertBefore(el, after.nextSibling);
+        load(el);
+      }
+    });
+  }
+
+  // Listados que se cargan después (filtros por AJAX, carruseles, «ver más»).
+  function watchCards() {
+    if (attr("data-cards") === "off" || !window.MutationObserver) return;
+    var t;
+    new MutationObserver(function () {
+      clearTimeout(t);
+      t = setTimeout(cards, 300);
+    }).observe(document.body, { childList: true, subtree: true });
   }
 
   function init() {
@@ -312,6 +398,8 @@
     } else {
       auto();
     }
+    cards();
+    watchCards();
   }
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);

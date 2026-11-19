@@ -9,7 +9,10 @@
  *
  * Modo manual (un producto): <div data-stock-urgency data-sku="TU-SKU"></div> + el mismo <script>.
  *   El modo manual NO muestra el cupón (pensado para la home); para mostrarlo: data-cupon="si".
- *   Al copiar el cupón se envía al dataLayer: { event: "copiar_cupon", item_name, item_id, coupon, copy_method }.
+ *   Analytics (dataLayer):
+ *     - ver_contador: una vez por página cuando la mitad del contador entra en pantalla
+ *       { item_name, item_id, quedan, coupon (vacío si no se muestra), placement: "ficha" | "manual" }
+ *     - copiar_cupon: { item_name, item_id, coupon, copy_method: "boton" | "seleccion_manual", placement }
  *   item_name sale del título de la ficha o de data-name="…" en el <div>.
  *   En la ficha (modo global) el cupón se muestra siempre que el contador tenga uno.
  * Si algo falla o no quedan unidades, no muestra nada.
@@ -50,7 +53,10 @@
 
     el.appendChild(p);
     el.appendChild(track);
-    if (data.cupon && wantsCoupon(el)) el.appendChild(coupon(data.cupon, data.cuponTexto, { sku: data.sku, name: productName(el) }));
+    var product = { sku: data.sku, name: productName(el), placement: el.getAttribute("data-placement") || "manual" };
+    var showCoupon = !!(data.cupon && wantsCoupon(el));
+    if (showCoupon) el.appendChild(coupon(data.cupon, data.cuponTexto, product));
+    trackView(el, product, n, showCoupon ? data.cupon : "");
     setTimeout(function () {
       bar.style.width = pct + "%";
     }, 100);
@@ -93,20 +99,56 @@
     return h ? h.textContent.trim() : "";
   }
 
-  // Evento para Google Tag Manager / GA4 cada vez que alguien copia el cupón.
-  function track(code, product, method) {
+  function push(obj) {
     try {
       window.dataLayer = window.dataLayer || [];
-      window.dataLayer.push({
-        event: "copiar_cupon",
-        item_name: product.name || "",
-        item_id: product.sku || "",
-        coupon: code,
-        copy_method: method,
-      });
+      window.dataLayer.push(obj);
     } catch (e) {
       /* analytics nunca rompe el contador */
     }
+  }
+
+  // Evento para Google Tag Manager / GA4 cada vez que alguien copia el cupón.
+  function track(code, product, method) {
+    push({
+      event: "copiar_cupon",
+      item_name: product.name || "",
+      item_id: product.sku || "",
+      coupon: code,
+      copy_method: method,
+      placement: product.placement,
+    });
+  }
+
+  // Una vez por contador y página, cuando al menos la mitad entra en pantalla.
+  function trackView(el, product, quedan, code) {
+    if (el.__stockViewSent) return;
+    var send = function () {
+      if (el.__stockViewSent) return;
+      el.__stockViewSent = true;
+      push({
+        event: "ver_contador",
+        item_name: product.name || "",
+        item_id: product.sku || "",
+        quedan: quedan,
+        coupon: code,
+        placement: product.placement,
+      });
+    };
+    if (!("IntersectionObserver" in window)) return send();
+    var io = new IntersectionObserver(
+      function (entries) {
+        for (var i = 0; i < entries.length; i++) {
+          if (entries[i].isIntersecting) {
+            io.disconnect();
+            send();
+            return;
+          }
+        }
+      },
+      { threshold: 0.5 },
+    );
+    io.observe(el);
   }
 
   function coupon(code, label, product) {
@@ -253,6 +295,7 @@
             if (el) {
               el.setAttribute("data-sku", skus[i]);
               el.setAttribute("data-cupon", "si");
+              el.setAttribute("data-placement", "ficha");
               load(el);
             }
             return;

@@ -8,6 +8,8 @@
  *     data-insert-after="..."   después de qué elemento se coloca el contador
  *
  * Modo manual (un producto): <div data-stock-urgency data-sku="TU-SKU"></div> + el mismo <script>.
+ *   El modo manual NO muestra el cupón (pensado para la home); para mostrarlo: data-cupon="si".
+ *   En la ficha (modo global) el cupón se muestra siempre que el contador tenga uno.
  * Si algo falla o no quedan unidades, no muestra nada.
  */
 (function () {
@@ -46,10 +48,15 @@
 
     el.appendChild(p);
     el.appendChild(track);
-    if (data.cupon) el.appendChild(coupon(data.cupon, data.cuponTexto));
+    if (data.cupon && wantsCoupon(el)) el.appendChild(coupon(data.cupon, data.cuponTexto));
     setTimeout(function () {
       bar.style.width = pct + "%";
     }, 100);
+  }
+
+  function wantsCoupon(el) {
+    var v = (el.getAttribute("data-cupon") || "").toLowerCase();
+    return v === "si" || v === "sí" || v === "true" || v === "1";
   }
 
   function copy(text) {
@@ -217,6 +224,7 @@
             var el = placeholder();
             if (el) {
               el.setAttribute("data-sku", skus[i]);
+              el.setAttribute("data-cupon", "si");
               load(el);
             }
             return;

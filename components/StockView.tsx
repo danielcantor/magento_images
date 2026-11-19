@@ -142,7 +142,7 @@ export default function StockView() {
   const globalSnippet = `<script src="${origin}/stock-widget.js" async></script>`;
 
   const snippet = form
-    ? `<div data-stock-urgency data-sku="${form.sku.replace(/"/g, "&quot;")}"></div>\n<script src="${origin}/stock-widget.js" async></script>`
+    ? `<div data-stock-urgency data-sku="${form.sku.replace(/"/g, "&quot;")}"${form.coupon ? ' data-cupon="si"' : ""}></div>\n<script src="${origin}/stock-widget.js" async></script>`
     : "";
 
   const toggleSource = (code: string) =>

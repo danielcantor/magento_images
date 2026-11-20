@@ -40,7 +40,7 @@ export class ApiError extends Error {
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, init);
   if (res.status === 401 && typeof window !== "undefined" && !url.startsWith("/api/auth")) {
-    window.location.href = "/login";
+    window.location.href = "/login?expired=1";
   }
   const body = await res.json().catch(() => ({}));
   if (!res.ok) {

@@ -3,7 +3,8 @@ import LoginForm from "@/components/LoginForm";
 
 export const dynamic = "force-dynamic";
 
-export default function LoginPage() {
+export default async function LoginPage({ searchParams }: { searchParams: Promise<{ expired?: string }> }) {
+  const expired = (await searchParams).expired === "1";
   return (
     <div className="login">
       {/* Líneas curvas y formas del brandbook (assets › misceláneas) */}
@@ -23,6 +24,11 @@ export default function LoginPage() {
         </div>
         <div className="card">
           <h1>Dashboard de la tienda</h1>
+          {expired && (
+            <div className="alert warn-box" role="status" style={{ marginBottom: 16 }}>
+              Tu sesión expiró. Volvé a entrar para seguir.
+            </div>
+          )}
           <LoginForm mode={getAuthMode()} otpRequired={process.env.MAGENTO_ADMIN_2FA !== "off"} />
         </div>
         <div className="foot">Dashboard interno · Magento 2</div>

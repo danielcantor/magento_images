@@ -1,15 +1,16 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { getAuthMode } from "@/lib/authMode";
-import { MAGENTO_SESSION_COOKIE, openMagentoSession, SESSION_COOKIE, verifySessionToken } from "@/lib/session";
+import { MAGENTO_SESSION_COOKIE, magentoSessionHours, openMagentoSession, SESSION_COOKIE, verifySessionToken } from "@/lib/session";
+import { isMagentoSessionValid } from "@/lib/sessionCheck";
 
-function deny(req: NextRequest, message: string) {
+function deny(req: NextRequest, message: string, expired = false) {
   if (req.nextUrl.pathname.startsWith("/api/")) {
     return NextResponse.json({ error: message }, { status: 401 });
   }
   const url = req.nextUrl.clone();
   url.pathname = "/login";
-  url.search = "";
+  url.search = expired ? "?expired=1" : "";
   return NextResponse.redirect(url);
 }
 
@@ -25,16 +26,22 @@ export async function middleware(req: NextRequest) {
   }
 
   if (mode === "magento") {
-    const session = await openMagentoSession(req.cookies.get(MAGENTO_SESSION_COOKIE)?.value).catch(() => null);
-    if (session) return NextResponse.next();
-    const res = deny(req, "Sesión caducada. Vuelve a entrar.");
+    const cookie = req.cookies.get(MAGENTO_SESSION_COOKIE)?.value;
+    const session = await openMagentoSession(cookie).catch(() => null);
+    // Antes de mostrar una página se confirma en Magento que el token sigue vigente.
+    // Las llamadas a la API no se comprueban aparte para no duplicar consultas a Magento.
+    const valid =
+      session && (req.nextUrl.pathname.startsWith("/api/") || (await isMagentoSessionValid(session, magentoSessionHours())));
+    if (valid) return NextResponse.next();
+    const res = deny(req, "Sesión caducada. Volvé a entrar.", Boolean(cookie));
     res.cookies.delete(MAGENTO_SESSION_COOKIE);
     return res;
   }
 
   if (mode === "password") {
-    const ok = await verifySessionToken(req.cookies.get(SESSION_COOKIE)?.value);
-    return ok ? NextResponse.next() : deny(req, "Sesión no válida");
+    const cookie = req.cookies.get(SESSION_COOKIE)?.value;
+    const ok = await verifySessionToken(cookie);
+    return ok ? NextResponse.next() : deny(req, "Sesión no válida", Boolean(cookie));
   }
 
   // Supabase: refresca la sesión y comprueba el usuario.

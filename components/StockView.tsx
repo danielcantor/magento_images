@@ -25,6 +25,8 @@ type SalesPreview = Awaited<ReturnType<typeof api.previewStockSales>>;
 
 interface PublicResult {
   status: number;
+  /** Si el contador estaba activo cuando se probó (un contador apagado responde 404 a propósito). */
+  enabled: boolean;
   body: { quedan?: number; inicial?: number; texto?: string; visible?: boolean; error?: string };
 }
 
@@ -59,13 +61,13 @@ export default function StockView() {
   }, []);
   useEffect(loadWidgets, [loadWidgets]);
 
-  async function testPublic(s: string) {
+  async function testPublic(s: string, enabled: boolean) {
     setPub(null);
     try {
       const r = await fetch(`/api/public/stock/${encodeURIComponent(s)}?t=${Date.now()}`, { cache: "no-store" });
-      setPub({ status: r.status, body: await r.json().catch(() => ({})) });
+      setPub({ status: r.status, enabled, body: await r.json().catch(() => ({})) });
     } catch (e) {
-      setPub({ status: 0, body: { error: (e as Error).message } });
+      setPub({ status: 0, enabled, body: { error: (e as Error).message } });
     }
   }
 
@@ -89,7 +91,7 @@ export default function StockView() {
       setForm(
         existing ?? { sku: s, mode: "sources", since: null, statuses: DEFAULT_SALE_STATUSES, initial: Math.max(1, Math.floor(units)), sources: withUnits, text: DEFAULT_TEXT, showAtOrBelow: 0, enabled: true },
       );
-      if (existing) void testPublic(existing.sku);
+      if (existing) void testPublic(existing.sku, existing.enabled);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -107,7 +109,7 @@ export default function StockView() {
       setForm(widget);
       setSaveMsg("Contador guardado.");
       loadWidgets();
-      await testPublic(widget.sku);
+      await testPublic(widget.sku, widget.enabled);
     } catch (e) {
       setSaveMsg((e as Error).message);
     } finally {
@@ -422,8 +424,17 @@ export default function StockView() {
               </div>
 
               {pub && (
-                <div className={pub.status === 200 ? "alert info" : "alert"}>
-                  {pub.status === 200 ? (
+                <div className={pub.status === 200 || (pub.status === 404 && !pub.enabled) ? "alert info" : "alert"}>
+                  {pub.status === 404 && !pub.enabled ? (
+                    <>
+                      Contador guardado y <b>apagado</b>: no se muestra en la tienda y el endpoint público responde «sin contador» hasta que lo actives.
+                    </>
+                  ) : pub.status === 404 ? (
+                    <>
+                      El endpoint público todavía no encuentra este contador. Después de guardarlo puede tardar hasta un minuto en verse; vuelve a abrirlo en unos
+                      segundos. Esto no depende de <code>MAGENTO_TOKEN</code>.
+                    </>
+                  ) : pub.status === 200 ? (
                     <>
                       Endpoint público OK: quedan <b>{pub.body.quedan}</b> de {pub.body.inicial}.{" "}
                       {pub.body.visible ? "Se muestra en la tienda." : "Ahora no se muestra (sin unidades o por encima de «Mostrar con»)."}

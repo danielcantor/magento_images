@@ -437,6 +437,11 @@ a.btn:hover { border-color: var(--accent-hover); color: var(--heading); }
 .tool:hover { border-color: var(--sc-violet); transform: translateY(-1px); }
 @media (prefers-color-scheme: dark) { .tool .go { color: var(--sc-green); } .tool:hover { border-color: var(--sc-green); } }
 
+.recent-card summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 10px; }
+.recent-card summary::-webkit-details-marker { display: none; }
+.recent-card summary::before { content: "▸"; color: var(--heading); transition: transform 0.15s; }
+.recent-card[open] summary::before { transform: rotate(90deg); }
+.recent-card summary h2 { margin: 0; }
 .recent { list-style: none; margin: 0; padding: 0; }
 .recent li { display: grid; grid-template-columns: 120px minmax(0, 1fr) auto auto; gap: 12px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--border); }
 .recent li:last-child { border-bottom: none; }

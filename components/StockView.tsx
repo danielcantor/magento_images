@@ -443,8 +443,8 @@ export default function StockView() {
                     </>
                   ) : pub.status === 404 ? (
                     <>
-                      El endpoint público todavía no encuentra este contador. Después de guardarlo puede tardar hasta un minuto en verse; vuelve a abrirlo en unos
-                      segundos. Esto no depende de <code>MAGENTO_TOKEN</code>.
+                      El endpoint público todavía no encuentra este contador. Después de guardarlo la tienda puede tardar hasta 10 minutos en verlo; vuelve a abrirlo en unos
+                      minutos. Esto no depende de <code>MAGENTO_TOKEN</code>.
                     </>
                   ) : pub.status === 200 ? (
                     <>

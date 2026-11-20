@@ -49,13 +49,19 @@ export default function HomeView({ username, auditEnabled }: { username: string 
   }, []);
   useEffect(load, [load]);
 
-  useEffect(() => {
-    if (!auditEnabled) return;
+  // El historial se lee solo al abrir la sección: listar Blob consume operaciones avanzadas
+  // (cupo chico) y el inicio se abre muchas veces.
+  const [recentError, setRecentError] = useState<string | null>(null);
+  function loadRecent() {
+    if (recent !== null) return;
     api
       .auditList()
       .then((r) => setRecent(r.items.slice(0, 5)))
-      .catch(() => setRecent([]));
-  }, [auditEnabled]);
+      .catch((e) => {
+        setRecentError((e as Error).message);
+        setRecent([]);
+      });
+  }
 
   const active = [...(status?.active ?? [])].sort((a, b) => rank(a) - rank(b) || (a.quedan ?? 0) - (b.quedan ?? 0));
   const count = (v: WidgetStatus["visibility"]) => active.filter((w) => w.visibility === v).length;
@@ -173,36 +179,39 @@ export default function HomeView({ username, auditEnabled }: { username: string 
 
       {/* ---------------- Historial ---------------- */}
       {auditEnabled && (
-        <section className="card stack" aria-labelledby="h-historial">
-          <div className="row">
-            <h2 id="h-historial" style={{ margin: 0 }}>
-              Tus últimas acciones
-            </h2>
-            <span className="spacer" />
-            <Link className="btn" href="/history">
-              Ver historial
-            </Link>
+        <details className="card recent-card" onToggle={(e) => (e.currentTarget as HTMLDetailsElement).open && loadRecent()}>
+          <summary>
+            <h2 id="h-historial">Tus últimas acciones</h2>
+          </summary>
+          <div className="stack" style={{ marginTop: 12 }}>
+            {recent === null ? (
+              <div className="muted">Cargando…</div>
+            ) : recentError ? (
+              <div className="alert">{recentError}</div>
+            ) : !recent.length ? (
+              <div className="empty">Todavía no hay acciones registradas.</div>
+            ) : (
+              <ul className="recent">
+                {recent.map((a) => (
+                  <li key={a.id}>
+                    <span className="muted small when">{fmtDate(a.startedAt)}</span>
+                    <span className="what">{AUDIT_KINDS[a.kind] ?? a.kind}</span>
+                    <span className="muted small">
+                      {a.total} {a.total === 1 ? "elemento" : "elementos"}
+                      {a.failed ? ` · ${a.failed} con error` : ""}
+                    </span>
+                    <span className={`badge ${STATUS_CLS[a.status]}`}>{AUDIT_STATUS_LABELS[a.status]}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div>
+              <Link className="btn" href="/history">
+                Ver historial completo
+              </Link>
+            </div>
           </div>
-          {recent === null ? (
-            <div className="muted">Cargando…</div>
-          ) : !recent.length ? (
-            <div className="empty">Todavía no hay acciones registradas.</div>
-          ) : (
-            <ul className="recent">
-              {recent.map((a) => (
-                <li key={a.id}>
-                  <span className="muted small when">{fmtDate(a.startedAt)}</span>
-                  <span className="what">{AUDIT_KINDS[a.kind] ?? a.kind}</span>
-                  <span className="muted small">
-                    {a.total} {a.total === 1 ? "elemento" : "elementos"}
-                    {a.failed ? ` · ${a.failed} con error` : ""}
-                  </span>
-                  <span className={`badge ${STATUS_CLS[a.status]}`}>{AUDIT_STATUS_LABELS[a.status]}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
+        </details>
       )}
     </div>
   );

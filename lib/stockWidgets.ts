@@ -4,7 +4,7 @@ import "server-only";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { cleanStatuses } from "./stockDiagnosis";
-import { get as blobGet, list as blobList, put as blobPut, del as blobDel } from "@vercel/blob";
+import { BlobPreconditionFailedError, get as blobGet, list as blobList, put as blobPut, del as blobDel } from "@vercel/blob";
 
 export type WidgetMode = "sources" | "orders";
 
@@ -40,22 +40,45 @@ export const DEFAULT_WIDGET_TEXT = "¡Solo quedan {n} unidades!";
 export const DEFAULT_COUPON_TEXT = "Sumá un descuento extra con el cupón";
 
 interface Store {
-  put(p: string, data: string): Promise<void>;
+  /** Con `ifMatch` solo escribe si el archivo no cambió (lanza StaleWriteError si cambió). */
+  put(p: string, data: string, ifMatch?: string): Promise<void>;
   get(p: string): Promise<string | null>;
+  /** Contenido y versión (etag) del archivo, para escrituras condicionales. */
+  getTagged?(p: string): Promise<{ text: string; etag?: string } | null>;
   list(prefix: string): Promise<string[]>;
   del(p: string): Promise<void>;
 }
 
+/** Otro proceso escribió el índice entre la lectura y la escritura. */
+class StaleWriteError extends Error {}
+
 const access = (): "private" | "public" => (process.env.AUDIT_BLOB_ACCESS === "public" ? "public" : "private");
 
 const blobStore: Store = {
-  async put(p, data) {
-    await blobPut(p, data, { access: access(), addRandomSuffix: false, allowOverwrite: true, contentType: "application/json", cacheControlMaxAge: 60 });
+  async put(p, data, ifMatch) {
+    try {
+      await blobPut(p, data, {
+        access: access(),
+        addRandomSuffix: false,
+        allowOverwrite: true,
+        contentType: "application/json",
+        cacheControlMaxAge: 60,
+        ...(ifMatch ? { ifMatch } : {}),
+      });
+    } catch (e) {
+      if (e instanceof BlobPreconditionFailedError) throw new StaleWriteError();
+      throw e;
+    }
   },
   async get(p) {
     const res = await blobGet(p, { access: access(), useCache: false });
     if (!res || !res.stream) return null;
     return await new Response(res.stream).text();
+  },
+  async getTagged(p) {
+    const res = await blobGet(p, { access: access(), useCache: false });
+    if (!res || !res.stream) return null;
+    return { text: await new Response(res.stream).text(), etag: res.blob.etag };
   },
   async list(prefix) {
     const out: string[] = [];
@@ -93,12 +116,15 @@ function localStore(dir: string): Store {
 }
 
 /** Solo para tests. */
-export function memoryStore(): Store {
+export function memoryStore(): Store & { calls: { get: number; list: number; put: number }; data: Map<string, string> } {
   const m = new Map<string, string>();
+  const calls = { get: 0, list: 0, put: 0 };
   return {
-    put: async (p, d) => void m.set(p, d),
-    get: async (p) => m.get(p) ?? null,
-    list: async (prefix) => [...m.keys()].filter((k) => k.startsWith(prefix)),
+    calls,
+    data: m,
+    put: async (p, d) => void (calls.put++, m.set(p, d)),
+    get: async (p) => (calls.get++, m.get(p) ?? null),
+    list: async (prefix) => (calls.list++, [...m.keys()].filter((k) => k.startsWith(prefix))),
     del: async (p) => void m.delete(p),
   };
 }
@@ -106,7 +132,7 @@ export function memoryStore(): Store {
 let override: Store | null = null;
 export function setWidgetStoreForTests(s: Store | null) {
   override = s;
-  cache.clear();
+  snapshot = null;
 }
 
 function store(): Store | null {
@@ -123,29 +149,93 @@ export function widgetsEnabled(): boolean {
 
 const PREFIX = "stock-widgets/";
 const keyOf = (sku: string) => `${PREFIX}${encodeURIComponent(sku.trim().toLowerCase())}.json`;
+/**
+ * Todos los contadores en un solo archivo. Leerlo es una operación simple de Blob;
+ * listar la carpeta es una operación avanzada (cupo muy chico en Hobby), así que la
+ * tienda nunca lista. Fuera de PREFIX para que no aparezca al listar la carpeta.
+ */
+const INDEX = "stock-widgets-index.json";
 
-// Caché corta para el endpoint público (cada visita de la tienda no debe leer Blob).
-const cache = new Map<string, { at: number; value: StockWidget | null }>();
-const CACHE_MS = 60_000;
+/**
+ * Copia en memoria para lo que pide la tienda (cada visita llama a stock-active y al
+ * contador de la ficha). Se renueva cada CACHE_MS; si Blob falla se sigue usando la
+ * última copia buena, aunque sea vieja.
+ */
+const CACHE_MS = 10 * 60_000;
+let snapshot: { at: number; widgets: StockWidget[] } | null = null;
 
-export async function getWidget(sku: string, opts: { cached?: boolean } = {}): Promise<StockWidget | null> {
-  const s = store();
-  if (!s) return null;
-  const k = keyOf(sku);
-  const hit = cache.get(k);
-  if (opts.cached && hit && Date.now() - hit.at < CACHE_MS) return hit.value;
-  const raw = await s.get(k);
-  const value = raw ? normalize(JSON.parse(raw)) : null;
-  cache.set(k, { at: Date.now(), value });
-  return value;
+interface IndexFile {
+  v: 1;
+  widgets: StockWidget[];
 }
 
-export async function listWidgets(): Promise<StockWidget[]> {
-  const s = store();
-  if (!s) return [];
+const sortWidgets = (ws: StockWidget[]) => [...ws].sort((a, b) => a.sku.localeCompare(b.sku));
+
+async function readIndex(s: Store): Promise<{ widgets: StockWidget[]; etag?: string; missing: boolean }> {
+  const r: { text: string; etag?: string } | null = s.getTagged
+    ? await s.getTagged(INDEX)
+    : await s.get(INDEX).then((text) => (text === null ? null : { text }));
+  if (!r) return { widgets: [], missing: true };
+  const parsed = JSON.parse(r.text) as IndexFile;
+  return { widgets: sortWidgets((parsed.widgets ?? []).map(normalize)), etag: r.etag, missing: false };
+}
+
+/** Primera vez: arma el índice con los archivos sueltos (una sola lista de la carpeta). */
+async function buildIndexFromFiles(s: Store): Promise<StockWidget[]> {
   const paths = await s.list(PREFIX);
   const all = await Promise.all(paths.map(async (p) => s.get(p).then((r) => (r ? normalize(JSON.parse(r)) : null))));
-  return all.filter((w): w is StockWidget => !!w).sort((a, b) => a.sku.localeCompare(b.sku));
+  const widgets = sortWidgets(all.filter((w): w is StockWidget => !!w));
+  await s.put(INDEX, JSON.stringify({ v: 1, widgets } satisfies IndexFile));
+  return widgets;
+}
+
+async function loadAll(s: Store): Promise<StockWidget[]> {
+  const idx = await readIndex(s);
+  const widgets = idx.missing ? await buildIndexFromFiles(s) : idx.widgets;
+  snapshot = { at: Date.now(), widgets };
+  return widgets;
+}
+
+/**
+ * Todos los contadores. `cached`: para la tienda (copia en memoria de hasta 10 min y la
+ * última buena si Blob falla). Sin `cached` (dashboard) se lee el índice actual.
+ */
+export async function listWidgets(opts: { cached?: boolean } = {}): Promise<StockWidget[]> {
+  const s = store();
+  if (!s) return [];
+  if (opts.cached && snapshot && Date.now() - snapshot.at < CACHE_MS) return snapshot.widgets;
+  try {
+    return await loadAll(s);
+  } catch (e) {
+    if (opts.cached && snapshot) {
+      console.error("Contadores: Blob no respondió, se usa la última copia", e);
+      snapshot = { ...snapshot, at: Date.now() - CACHE_MS + 60_000 }; // reintentar en 1 minuto
+      return snapshot.widgets;
+    }
+    throw e;
+  }
+}
+
+export async function getWidget(sku: string, opts: { cached?: boolean } = {}): Promise<StockWidget | null> {
+  const k = sku.trim().toLowerCase();
+  return (await listWidgets(opts)).find((w) => w.sku.toLowerCase() === k) ?? null;
+}
+
+/** Cambia el índice leyendo y escribiendo con control de versión (reintenta si otro lo cambió). */
+async function updateIndex(s: Store, change: (ws: StockWidget[]) => StockWidget[]): Promise<void> {
+  for (let attempt = 0; ; attempt++) {
+    const idx = await readIndex(s);
+    const current = idx.missing ? await buildIndexFromFiles(s) : idx.widgets;
+    const next = sortWidgets(change(current));
+    try {
+      await s.put(INDEX, JSON.stringify({ v: 1, widgets: next } satisfies IndexFile), idx.etag);
+      snapshot = { at: Date.now(), widgets: next };
+      return;
+    } catch (e) {
+      if (!(e instanceof StaleWriteError) || attempt >= 4) throw e;
+      await new Promise((r) => setTimeout(r, 150 * (attempt + 1)));
+    }
+  }
 }
 
 /** Contadores guardados antes de existir el modo por ventas. */
@@ -192,14 +282,17 @@ export async function saveWidget(input: Omit<StockWidget, "updatedAt" | "updated
   const s = store();
   if (!s) throw new WidgetInputError("Falta configurar Vercel Blob (BLOB_STORE_ID o BLOB_READ_WRITE_TOKEN) para guardar contadores.");
   const w: StockWidget = { ...input, updatedAt: new Date().toISOString(), updatedBy: user };
+  const k = w.sku.toLowerCase();
+  await updateIndex(s, (ws) => [...ws.filter((x) => x.sku.toLowerCase() !== k), w]);
+  // Copia suelta por SKU: respaldo legible y compatible con versiones anteriores.
   await s.put(keyOf(w.sku), JSON.stringify(w));
-  cache.delete(keyOf(w.sku));
   return w;
 }
 
 export async function deleteWidget(sku: string): Promise<void> {
   const s = store();
   if (!s) return;
+  const k = sku.trim().toLowerCase();
+  await updateIndex(s, (ws) => ws.filter((x) => x.sku.toLowerCase() !== k));
   await s.del(keyOf(sku));
-  cache.delete(keyOf(sku));
 }

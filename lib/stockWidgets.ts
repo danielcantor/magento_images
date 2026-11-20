@@ -112,7 +112,8 @@ export function setWidgetStoreForTests(s: Store | null) {
 function store(): Store | null {
   if (override) return override;
   if (process.env.AUDIT_LOCAL_DIR) return localStore(process.env.AUDIT_LOCAL_DIR);
-  if (process.env.BLOB_READ_WRITE_TOKEN) return blobStore;
+  // BLOB_STORE_ID (store conectado por OIDC) tiene prioridad sobre BLOB_READ_WRITE_TOKEN en @vercel/blob.
+  if (process.env.BLOB_STORE_ID || process.env.BLOB_READ_WRITE_TOKEN) return blobStore;
   return null;
 }
 
@@ -189,7 +190,7 @@ export function parseWidgetInput(body: unknown): Omit<StockWidget, "updatedAt" |
 
 export async function saveWidget(input: Omit<StockWidget, "updatedAt" | "updatedBy">, user: string | null): Promise<StockWidget> {
   const s = store();
-  if (!s) throw new WidgetInputError("Falta configurar Vercel Blob (BLOB_READ_WRITE_TOKEN) para guardar contadores.");
+  if (!s) throw new WidgetInputError("Falta configurar Vercel Blob (BLOB_STORE_ID o BLOB_READ_WRITE_TOKEN) para guardar contadores.");
   const w: StockWidget = { ...input, updatedAt: new Date().toISOString(), updatedBy: user };
   await s.put(keyOf(w.sku), JSON.stringify(w));
   cache.delete(keyOf(w.sku));

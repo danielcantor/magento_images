@@ -87,7 +87,8 @@ export function setAuditStoreForTests(store: AuditStore | null) {
 function store(): AuditStore | null {
   if (override) return override;
   if (process.env.AUDIT_LOCAL_DIR) return localStore(process.env.AUDIT_LOCAL_DIR);
-  if (process.env.BLOB_READ_WRITE_TOKEN) return blobStore;
+  // BLOB_STORE_ID (store conectado por OIDC) tiene prioridad sobre BLOB_READ_WRITE_TOKEN en @vercel/blob.
+  if (process.env.BLOB_STORE_ID || process.env.BLOB_READ_WRITE_TOKEN) return blobStore;
   return null;
 }
 

@@ -122,7 +122,7 @@ Al guardar un producto por la API, Magento vuelve a grabar todos sus productos v
 Cada acción queda registrada: Subida masiva, Imagen a varios SKU, borrados masivos, Igualar tiendas y cada guardado, reemplazo, borrado o añadido en el editor. Cada registro guarda el usuario de Magento, la fecha, la duración, los parámetros, los productos y el resultado de cada imagen. El registro se abre al empezar, así que si alguien cierra la pestaña la acción queda como «En curso».
 
 - **Dónde se ve**: en **Historial**. Cada usuario ve solo sus propias acciones. Se puede filtrar por tipo, abrir el detalle y descargarlo en CSV.
-- **Dónde se guarda**: en un almacenamiento privado de **Vercel Blob**, conectado al proyecto. Usa `BLOB_READ_WRITE_TOKEN`, que Vercel crea al conectar el store. Si la variable no existe, el registro se desactiva y el resto funciona igual.
+- **Dónde se guarda**: en un almacenamiento privado de **Vercel Blob**, conectado al proyecto. Usa `BLOB_STORE_ID` (autenticación OIDC, la que crea Vercel al conectar un store nuevo) o, si no está, `BLOB_READ_WRITE_TOKEN`. Así cada entorno puede tener su propio store (p. ej. uno de staging solo para Preview). Si no existe ninguna, el registro se desactiva y el resto funciona igual.
 - **Desarrollo local**: con `AUDIT_LOCAL_DIR=./audit-data` se guarda en disco.
 
 ## 3. (Opcional) Login por usuario con Supabase

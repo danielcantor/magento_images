@@ -38,6 +38,7 @@ let mem: ReturnType<typeof memoryStore>;
 beforeEach(() => {
   delete process.env.AUDIT_LOCAL_DIR;
   delete process.env.BLOB_READ_WRITE_TOKEN;
+  delete process.env.BLOB_STORE_ID;
   mem = memoryStore();
   setAuditStoreForTests(mem);
 });

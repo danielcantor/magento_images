@@ -1,9 +1,10 @@
-# Dashboard de imágenes para Magento 2
+# Dashboard de la tienda (Magento 2)
 
 Web para **subir, ordenar, editar y borrar imágenes de productos de Magento 2 de forma masiva**, usando la REST API de la tienda. Se despliega en **Vercel**; **Supabase** es opcional (login por usuario y historial de lotes).
 
 ## Qué hace
 
+- **Inicio**: estado de los contadores de stock activos (unidades que quedan, si se ven en la tienda, agotados, ocultos por umbral y apagados), aviso si `MAGENTO_TOKEN` no responde, accesos a las herramientas de imágenes y tus últimas acciones.
 - **Productos**: busca por SKU o nombre y filtra por estado (activo/inactivo) y por sitio web o store view. Eliges cuántos ver por página (25, 50, 100 o 200) y la URL guarda los filtros. La tabla muestra miniatura, estado, sitios, número de imágenes y un aviso si falta la imagen base. Haz clic en una fila para abrir sus imágenes.
 - **Editor por producto**: arrastra para reordenar, asigna roles (los de tu tienda: se leen de Magento, incluidos los de módulos como Hover o Abandoned Cart Image), edita el texto alternativo, oculta, reemplaza (conserva rol y posición), borra y añade imágenes.
 - **Subida masiva por SKU**: arrastra cientos de archivos con nombres `SKU.jpg`, `SKU_2.jpg`, `SKU_3.jpg`…

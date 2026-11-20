@@ -83,6 +83,26 @@ export async function getProductIds(skus: string[], token?: string): Promise<Rec
   return out;
 }
 
+/** Nombre de cada SKU (para mostrar en el inicio). */
+export async function getProductNames(skus: string[], token?: string): Promise<Record<string, string>> {
+  if (!skus.length) return {};
+  const p = new URLSearchParams({
+    "searchCriteria[filter_groups][0][filters][0][field]": "sku",
+    "searchCriteria[filter_groups][0][filters][0][value]": skus.join(","),
+    "searchCriteria[filter_groups][0][filters][0][condition_type]": "in",
+    "searchCriteria[pageSize]": "500",
+    fields: "items[sku,name]",
+  });
+  const r = await magentoFetch<{ items?: { sku: string; name: string }[] | null }>(`/products?${p}`, {}, 2, { token });
+  const found = new Map((r.items ?? []).map((i) => [i.sku.toLowerCase(), i.name]));
+  const out: Record<string, string> = {};
+  for (const s of skus) {
+    const n = found.get(s.toLowerCase());
+    if (n) out[s] = n;
+  }
+  return out;
+}
+
 /** Solo para tests. */
 export function clearProductIdCache() {
   idCache.clear();

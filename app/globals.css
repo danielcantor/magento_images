@@ -99,10 +99,6 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 1
 }
 .brand { display: flex; align-items: center; gap: 12px; text-decoration: none; flex-shrink: 0; }
 .brand img { height: 22px; width: auto; display: block; } /* ≈ 200 px de ancho (mínimo digital: 130 px) */
-.brand .tag {
-  font-family: var(--font-heading); font-size: 11px; font-weight: 700; letter-spacing: 0.12em;
-  text-transform: uppercase; color: var(--sc-green); border-left: 1px solid rgba(255,255,255,0.3); padding-left: 12px;
-}
 .nav { display: flex; gap: 6px; flex: 1; overflow-x: auto; scrollbar-width: none; }
 .nav a {
   padding: 8px 14px; border-radius: 999px; text-decoration: none; white-space: nowrap;
@@ -118,7 +114,6 @@ main { padding: 28px; max-width: 1280px; margin: 0 auto; }
 @media (max-width: 760px) {
   /* Celular: logo + botón de menú; las secciones y «Salir» se despliegan debajo. */
   .topbar { padding: 0 16px; gap: 12px; height: 56px; flex-wrap: wrap; }
-  .brand .tag { display: none; }
   .brand img { height: 18px; }
   .menu-toggle {
     display: inline-flex; align-items: center; gap: 8px; margin-left: auto; min-height: 44px; padding: 0 14px;
@@ -394,3 +389,73 @@ details.collapsible[open] > summary { margin-bottom: 0; padding-bottom: 12px; }
 details.collapsible > summary:hover h2 { text-decoration: underline; }
 details.collapsible > summary:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 @media (prefers-reduced-motion: reduce) { details.collapsible > summary::before { transition: none; } }
+
+/* ---------- Inicio ---------- */
+a.btn { display: inline-flex; align-items: center; text-decoration: none; }
+a.btn:hover { border-color: var(--accent-hover); color: var(--heading); }
+.home .empty { padding: 18px; border: 1.5px dashed var(--border); border-radius: var(--radius-sm); color: var(--muted); text-align: center; }
+.home .empty a { color: var(--heading); font-weight: 600; }
+
+.kpis { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
+.kpi {
+  display: flex; flex-direction: column; gap: 2px; padding: 14px 16px; border-radius: var(--radius-sm);
+  background: var(--surface-2); border-left: 4px solid var(--sc-violet);
+}
+.kpi.ok { border-left-color: var(--sc-olive); }
+.kpi.err { border-left-color: var(--err); background: var(--err-bg); }
+.kpi.muted-kpi { border-left-color: var(--sc-gray-light); }
+.kpi-value { font-family: var(--font-heading); font-weight: 800; font-size: 28px; line-height: 1.1; color: var(--heading); font-variant-numeric: tabular-nums; }
+.kpi.err .kpi-value { color: var(--err); }
+.kpi-label { font-family: var(--font-heading); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+
+.token-line { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+.token-line .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--sc-olive); flex-shrink: 0; }
+
+.counter-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.counter {
+  display: grid; grid-template-columns: minmax(0, 1fr) 200px 150px auto; gap: 16px; align-items: center;
+  padding: 12px 16px; border-bottom: 1px solid var(--border);
+}
+.counter:last-child { border-bottom: none; }
+.counter.out { background: color-mix(in srgb, var(--err-bg) 55%, transparent); }
+.counter-title { display: flex; gap: 10px; align-items: baseline; min-width: 0; }
+.counter-title code { font-weight: 700; color: var(--heading); white-space: nowrap; }
+.counter-title .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.counter-meter .qty { font-family: var(--font-heading); font-size: 16px; font-variant-numeric: tabular-nums; }
+.meter { height: 6px; border-radius: 6px; background: var(--surface-2); overflow: hidden; margin-top: 4px; }
+.meter span { display: block; height: 100%; background: var(--sc-violet); border-radius: 6px; }
+.counter.out .meter span { background: var(--err); }
+@media (prefers-color-scheme: dark) { .meter span { background: var(--sc-green); } }
+.counter-edit { padding: 6px 14px; }
+.chip { display: inline-block; padding: 4px 10px; border-radius: 999px; background: var(--surface-2); text-decoration: none; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+.chip:hover { color: var(--heading); }
+
+.tools { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.tool { display: flex; flex-direction: column; gap: 6px; text-decoration: none; position: relative; padding: 18px 20px 36px; transition: border-color 0.15s, transform 0.15s; }
+.tool b { font-family: var(--font-heading); color: var(--heading); font-size: 15px; }
+.tool .go { position: absolute; right: 18px; bottom: 12px; color: var(--sc-violet); font-weight: 700; }
+.tool:hover { border-color: var(--sc-violet); transform: translateY(-1px); }
+@media (prefers-color-scheme: dark) { .tool .go { color: var(--sc-green); } .tool:hover { border-color: var(--sc-green); } }
+
+.recent { list-style: none; margin: 0; padding: 0; }
+.recent li { display: grid; grid-template-columns: 120px minmax(0, 1fr) auto auto; gap: 12px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--border); }
+.recent li:last-child { border-bottom: none; }
+.recent .what { font-weight: 600; }
+.recent .when { white-space: nowrap; }
+.recent .badge { justify-self: start; }
+
+@media (max-width: 1000px) {
+  .kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .tools { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 760px) {
+  .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .kpi-value { font-size: 22px; }
+  .tools { grid-template-columns: minmax(0, 1fr); }
+  .counter { grid-template-columns: minmax(0, 1fr) auto; gap: 8px 12px; }
+  .counter-main, .counter-meter { grid-column: 1 / -1; }
+  .counter-title { flex-direction: column; gap: 2px; }
+  .counter-title .name { white-space: normal; }
+  .recent li { grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; }
+  .recent .when { grid-column: 1 / -1; }
+}

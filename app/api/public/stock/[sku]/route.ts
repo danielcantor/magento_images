@@ -6,6 +6,7 @@ import { getSourceItems } from "@/lib/stock";
 import { countSoldUnits } from "@/lib/stockSales";
 import { remainingUnits } from "@/lib/stockDiagnosis";
 import { getWidget } from "@/lib/stockWidgets";
+import { widgetVisibility } from "@/lib/stockVisibility";
 
 export const dynamic = "force-dynamic";
 
@@ -44,7 +45,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ sku: string }>
       widget.mode === "orders" && widget.since
         ? Math.max(0, widget.initial - (await countSoldUnits(widget.sku, widget.since, widget.statuses, token)).units)
         : remainingUnits(await getSourceItems(widget.sku, token), widget.sources);
-    const visible = quedan > 0 && (widget.showAtOrBelow === 0 || quedan <= widget.showAtOrBelow);
+    const visible = widgetVisibility(quedan, widget.showAtOrBelow) === "visible";
     return reply(
       { sku: widget.sku, quedan, inicial: widget.initial, texto: widget.text, visible, ...(widget.coupon ? { cupon: widget.coupon, cuponTexto: widget.couponText } : {}) },
       200,

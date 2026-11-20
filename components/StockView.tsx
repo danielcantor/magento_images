@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type StockWidgetDto } from "@/lib/api";
 import CouponFields, { DEFAULT_COUPON_TEXT, confirmCoupon } from "./CouponFields";
 import { DEFAULT_SALE_STATUSES, type StockReport, type StockRow } from "@/lib/stockDiagnosis";
@@ -42,6 +42,9 @@ export default function StockView() {
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
   const [pub, setPub] = useState<PublicResult | null>(null);
+  // ?sku=… (enlace desde el inicio): se abre ese contador cuando ya se conoce la lista.
+  const [listLoaded, setListLoaded] = useState(false);
+  const openedFromUrl = useRef(false);
   const [origin, setOrigin] = useState("");
   const [allSources, setAllSources] = useState(false);
   const [sales, setSales] = useState<SalesPreview | null>(null);
@@ -56,6 +59,7 @@ export default function StockView() {
       .then((r) => {
         setWidgetsEnabled(r.enabled);
         setWidgets(r.widgets);
+        setListLoaded(true);
       })
       .catch((e) => setError((e as Error).message));
   }, []);
@@ -70,6 +74,14 @@ export default function StockView() {
       setPub({ status: 0, enabled, body: { error: (e as Error).message } });
     }
   }
+
+  useEffect(() => {
+    if (!listLoaded || openedFromUrl.current) return;
+    openedFromUrl.current = true;
+    const target = new URLSearchParams(window.location.search).get("sku");
+    if (target) void search(target);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listLoaded]);
 
   async function search(target = sku) {
     const s = target.trim();

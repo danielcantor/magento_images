@@ -9,13 +9,16 @@ export default function Nav({ mode, username, auditEnabled = false }: { mode: Au
   const path = usePathname();
   const [open, setOpen] = useState(false);
   const links = [
+    { href: "/", label: "Inicio" },
     { href: "/products", label: "Productos" },
     { href: "/bulk", label: "Subida masiva" },
     { href: "/shared", label: "Imagen a varios SKU" },
     { href: "/stock", label: "Contadores" },
     ...(auditEnabled ? [{ href: "/history", label: "Historial" }] : []),
   ];
-  const current = links.find((l) => path.startsWith(l.href));
+  // "/" solo es activo en el inicio (si no, coincidiría con todas las rutas).
+  const isActive = (href: string) => (href === "/" ? path === "/" : path.startsWith(href));
+  const current = links.find((l) => isActive(l.href));
 
   // En celular el menú se cierra al cambiar de página o con Escape.
   useEffect(() => setOpen(false), [path]);
@@ -34,10 +37,9 @@ export default function Nav({ mode, username, auditEnabled = false }: { mode: Au
 
   return (
     <header className={`topbar${open ? " menu-open" : ""}`}>
-      <Link href="/products" className="brand" aria-label="SommierCenter · Imágenes">
+      <Link href="/" className="brand" aria-label="SommierCenter · Inicio">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src="/brand/logo.svg" alt="SommierCenter" width={200} height={22} />
-        <span className="tag">Imágenes</span>
       </Link>
       <button
         type="button"
@@ -51,7 +53,7 @@ export default function Nav({ mode, username, auditEnabled = false }: { mode: Au
       </button>
       <nav className="nav" id="main-nav" aria-label="Secciones">
         {links.map((l) => (
-          <Link key={l.href} href={l.href} className={path.startsWith(l.href) ? "active" : ""} aria-current={path.startsWith(l.href) ? "page" : undefined}>
+          <Link key={l.href} href={l.href} className={isActive(l.href) ? "active" : ""} aria-current={isActive(l.href) ? "page" : undefined}>
             {l.label}
           </Link>
         ))}

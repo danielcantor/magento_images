@@ -7,8 +7,8 @@ const montserrat = Montserrat({ subsets: ["latin"], weight: ["400", "500", "600"
 const inter = Inter({ subsets: ["latin"], variable: "--font-body" });
 
 export const metadata: Metadata = {
-  title: "Imágenes · SommierCenter",
-  description: "Carga y edición masiva de imágenes de productos en Magento 2",
+  title: "SommierCenter · Dashboard",
+  description: "Dashboard interno de la tienda Magento 2: contadores de stock e imágenes de productos",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

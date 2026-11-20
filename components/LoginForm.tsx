@@ -16,7 +16,7 @@ export default function LoginForm({ mode, otpRequired = true }: { mode: AuthMode
       <p className="muted">
         No hay acceso configurado. Definí <code>AUTH_MODE=magento</code>, <code>DASHBOARD_PASSWORD</code> (con{" "}
         <code>SESSION_SECRET</code>) o las variables de Supabase. En local podés entrar directamente:{" "}
-        <a href="/products">ir al dashboard</a>.
+        <a href="/">ir al dashboard</a>.
       </p>
     );
   }
@@ -37,7 +37,7 @@ export default function LoginForm({ mode, otpRequired = true }: { mode: AuthMode
         });
         if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? "Error al entrar");
       }
-      window.location.href = "/products";
+      window.location.href = "/";
     } catch (err) {
       setError((err as Error).message);
       if (mode === "magento") setOtp(""); // el código es de un solo uso

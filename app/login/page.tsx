@@ -22,7 +22,7 @@ export default function LoginPage() {
           <div className="claim">Un lugar, las mejores marcas</div>
         </div>
         <div className="card">
-          <h1>Imágenes de productos</h1>
+          <h1>Dashboard de la tienda</h1>
           <LoginForm mode={getAuthMode()} otpRequired={process.env.MAGENTO_ADMIN_2FA !== "off"} />
         </div>
         <div className="foot">Dashboard interno · Magento 2</div>

@@ -2,6 +2,7 @@
 import type { AuditLine, AuditRecord, AuditStatus, AuditSummary } from "./auditKinds";
 import type { MediaEntry, MediaRole, ProductSearchResult, Website } from "./types";
 import type { StockReport } from "./stockDiagnosis";
+import type { WidgetsStatusResponse } from "./stockVisibility";
 
 export interface CouponCheck {
   /** "ok" | "missing" (no existe) | "inactive" | "expired" | "unknown" (no se pudo verificar) */
@@ -63,6 +64,7 @@ const enc = encodeURIComponent;
 export const api = {
   stockReport: (sku: string) => request<StockReport>(`/api/stock/${enc(sku)}`),
   stockWidgets: () => request<{ enabled: boolean; widgets: StockWidgetDto[] }>("/api/stock/widgets"),
+  stockWidgetsStatus: () => request<WidgetsStatusResponse>("/api/stock/widgets/status"),
   saveStockWidget: (w: StockWidgetDto) => request<{ widget: StockWidgetDto }>("/api/stock/widgets", json("PUT", w)),
   previewStockSales: (w: StockWidgetDto) =>
     request<{

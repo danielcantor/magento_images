@@ -1,13 +1,16 @@
 import { NextResponse } from "next/server";
 import { deleteWidget, listWidgets, parseWidgetInput, saveWidget, widgetsEnabled, WidgetInputError } from "@/lib/stockWidgets";
 import { getSessionUser } from "@/lib/sessionUser";
+import { MagentoError } from "@/lib/magento";
 
 export const dynamic = "force-dynamic";
 
 const fail = (e: unknown) =>
   e instanceof WidgetInputError
     ? NextResponse.json({ error: e.message }, { status: 400 })
-    : (console.error(e), NextResponse.json({ error: "No se pudieron guardar los contadores." }, { status: 500 }));
+    : e instanceof MagentoError
+      ? NextResponse.json({ error: e.message }, { status: e.status === 401 ? 403 : e.status >= 400 && e.status < 600 ? e.status : 502 })
+      : (console.error(e), NextResponse.json({ error: "No se pudieron guardar los contadores." }, { status: 500 }));
 
 export async function GET() {
   if (!widgetsEnabled()) return NextResponse.json({ enabled: false, widgets: [] });

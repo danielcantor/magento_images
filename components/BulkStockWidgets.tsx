@@ -65,7 +65,7 @@ export default function BulkStockWidgets({ skus, names, onClose }: { skus: strin
             return { ...r, stock, initial: stock > 0 ? String(stock) : "", existing: existing.has(r.sku.toLowerCase()) };
           }),
         );
-        if (!w.enabled) setError("Para guardar contadores hace falta Vercel Blob (BLOB_STORE_ID o BLOB_READ_WRITE_TOKEN) en este entorno.");
+        if (!w.enabled) setError("Para guardar contadores hace falta MAGENTO_BASE_URL en este entorno.");
       })
       .catch((e) => !cancelled && setError((e as Error).message))
       .finally(() => !cancelled && setLoading(false));

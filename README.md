@@ -118,6 +118,14 @@ Al guardar un producto por la API, Magento vuelve a grabar todos sus productos v
 - **Revisar vínculos** (Productos → seleccionar → acción masiva): solo lee e indica qué productos tienen vínculos a SKU que ya no existen.
 - **Reparar vínculos** (acción masiva, o el botón que aparece en el error del editor): vuelve a guardar el producto con los vínculos válidos, como hace el Admin. Quita solo los que apuntan a SKU inexistentes y queda en el Historial.
 
+## Contadores de stock: dónde se guardan
+
+La lista de contadores se guarda en Magento, en un **bloque CMS desactivado** con identificador `sc-contadores-stock` (contenido JSON). No se muestra en la tienda; no lo edites ni lo actives a mano.
+
+- **Permisos**: la integración de `MAGENTO_TOKEN` necesita lectura en **Content → Elements → Blocks** (la tienda lee la lista con ese token). Los usuarios que crean o editan contadores necesitan el mismo recurso en su rol. El Inicio avisa si `MAGENTO_TOKEN` no puede leer el bloque.
+- **Caché**: lo que pide la tienda usa una copia en memoria de 10 minutos y la CDN guarda la lista de activos 5 minutos; un cambio puede tardar hasta ~10 minutos en verse en la tienda.
+- **Alternativa**: con `STOCK_WIDGETS_STORAGE=blob` se guardan en Vercel Blob (un archivo índice). En desarrollo, con `AUDIT_LOCAL_DIR`, en disco.
+
 ## Historial de acciones
 
 Cada acción queda registrada: Subida masiva, Imagen a varios SKU, borrados masivos, Igualar tiendas y cada guardado, reemplazo, borrado o añadido en el editor. Cada registro guarda el usuario de Magento, la fecha, la duración, los parámetros, los productos y el resultado de cada imagen. El registro se abre al empezar, así que si alguien cierra la pestaña la acción queda como «En curso».

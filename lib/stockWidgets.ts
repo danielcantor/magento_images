@@ -1,9 +1,12 @@
 // Contadores "Quedan X unidades" publicados en la tienda. Solo servidor.
-// Se guarda un JSON por SKU en Vercel Blob (privado) o, en desarrollo, en disco.
+// Se guardan todos juntos, como JSON, en un bloque CMS desactivado de Magento
+// (sin cupos ni costo). Alternativas: Vercel Blob (STOCK_WIDGETS_STORAGE=blob) o,
+// en desarrollo, una carpeta local (AUDIT_LOCAL_DIR).
 import "server-only";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { cleanStatuses } from "./stockDiagnosis";
+import { MagentoError, magentoFetch } from "./magento";
 import { BlobPreconditionFailedError, get as blobGet, list as blobList, put as blobPut, del as blobDel } from "@vercel/blob";
 
 export type WidgetMode = "sources" | "orders";
@@ -135,16 +138,21 @@ export function setWidgetStoreForTests(s: Store | null) {
   snapshot = null;
 }
 
-function store(): Store | null {
-  if (override) return override;
-  if (process.env.AUDIT_LOCAL_DIR) return localStore(process.env.AUDIT_LOCAL_DIR);
+const blobConfigured = () => Boolean(process.env.BLOB_STORE_ID || process.env.BLOB_READ_WRITE_TOKEN);
+
+/** Dónde se guardan los contadores (ver encabezado). */
+function backend(): Backend | null {
+  if (override) return storeBackend(override);
+  if (process.env.AUDIT_LOCAL_DIR) return storeBackend(localStore(process.env.AUDIT_LOCAL_DIR));
   // BLOB_STORE_ID (store conectado por OIDC) tiene prioridad sobre BLOB_READ_WRITE_TOKEN en @vercel/blob.
-  if (process.env.BLOB_STORE_ID || process.env.BLOB_READ_WRITE_TOKEN) return blobStore;
+  if (process.env.STOCK_WIDGETS_STORAGE === "blob" && blobConfigured()) return storeBackend(blobStore);
+  if (process.env.MAGENTO_BASE_URL) return magentoBackend;
+  if (blobConfigured()) return storeBackend(blobStore);
   return null;
 }
 
 export function widgetsEnabled(): boolean {
-  return store() !== null;
+  return backend() !== null;
 }
 
 const PREFIX = "stock-widgets/";
@@ -158,8 +166,8 @@ const INDEX = "stock-widgets-index.json";
 
 /**
  * Copia en memoria para lo que pide la tienda (cada visita llama a stock-active y al
- * contador de la ficha). Se renueva cada CACHE_MS; si Blob falla se sigue usando la
- * última copia buena, aunque sea vieja.
+ * contador de la ficha). Se renueva cada CACHE_MS; si la lectura falla se sigue usando
+ * la última copia buena, aunque sea vieja.
  */
 const CACHE_MS = 10 * 60_000;
 let snapshot: { at: number; widgets: StockWidget[] } | null = null;
@@ -171,48 +179,174 @@ interface IndexFile {
 
 const sortWidgets = (ws: StockWidget[]) => [...ws].sort((a, b) => a.sku.localeCompare(b.sku));
 
-async function readIndex(s: Store): Promise<{ widgets: StockWidget[]; etag?: string; missing: boolean }> {
-  const r: { text: string; etag?: string } | null = s.getTagged
-    ? await s.getTagged(INDEX)
-    : await s.get(INDEX).then((text) => (text === null ? null : { text }));
-  if (!r) return { widgets: [], missing: true };
-  const parsed = JSON.parse(r.text) as IndexFile;
-  return { widgets: sortWidgets((parsed.widgets ?? []).map(normalize)), etag: r.etag, missing: false };
+/**
+ * `publicRead`: lectura para la tienda (con MAGENTO_TOKEN). Si no, con el usuario conectado.
+ * `version` sirve para escribir solo si nadie cambió la lista entre la lectura y la escritura.
+ */
+interface Backend {
+  read(opts: { publicRead: boolean }): Promise<{ widgets: StockWidget[]; version?: string }>;
+  write(widgets: StockWidget[], version: string | undefined, change: { saved?: StockWidget; deletedSku?: string }): Promise<void>;
 }
 
-/** Primera vez: arma el índice con los archivos sueltos (una sola lista de la carpeta). */
-async function buildIndexFromFiles(s: Store): Promise<StockWidget[]> {
-  const paths = await s.list(PREFIX);
-  const all = await Promise.all(paths.map(async (p) => s.get(p).then((r) => (r ? normalize(JSON.parse(r)) : null))));
-  const widgets = sortWidgets(all.filter((w): w is StockWidget => !!w));
-  await s.put(INDEX, JSON.stringify({ v: 1, widgets } satisfies IndexFile));
-  return widgets;
+// ---------------------------------------------------------------------------
+// Blob / carpeta local: un archivo índice (leerlo es operación simple de Blob; la tienda nunca lista).
+
+function storeBackend(s: Store): Backend {
+  async function readIndex() {
+    const r: { text: string; etag?: string } | null = s.getTagged
+      ? await s.getTagged(INDEX)
+      : await s.get(INDEX).then((text) => (text === null ? null : { text }));
+    if (!r) return null;
+    const parsed = JSON.parse(r.text) as IndexFile;
+    return { widgets: sortWidgets((parsed.widgets ?? []).map(normalize)), version: r.etag };
+  }
+  /** Primera vez: arma el índice con los archivos sueltos (una sola lista de la carpeta). */
+  async function buildFromFiles() {
+    const paths = await s.list(PREFIX);
+    const all = await Promise.all(paths.map(async (p) => s.get(p).then((r) => (r ? normalize(JSON.parse(r)) : null))));
+    const widgets = sortWidgets(all.filter((w): w is StockWidget => !!w));
+    await s.put(INDEX, JSON.stringify({ v: 1, widgets } satisfies IndexFile));
+    return { widgets, version: undefined };
+  }
+  return {
+    async read() {
+      return (await readIndex()) ?? (await buildFromFiles());
+    },
+    async write(widgets, version, change) {
+      await s.put(INDEX, JSON.stringify({ v: 1, widgets } satisfies IndexFile), version);
+      // Copia suelta por SKU: respaldo legible y compatible con versiones anteriores.
+      if (change.saved) await s.put(keyOf(change.saved.sku), JSON.stringify(change.saved));
+      if (change.deletedSku) await s.del(keyOf(change.deletedSku));
+    },
+  };
 }
 
-async function loadAll(s: Store): Promise<StockWidget[]> {
-  const idx = await readIndex(s);
-  const widgets = idx.missing ? await buildIndexFromFiles(s) : idx.widgets;
-  snapshot = { at: Date.now(), widgets };
-  return widgets;
+// ---------------------------------------------------------------------------
+// Magento: bloque CMS desactivado (nunca se muestra en la tienda) con la lista en JSON.
+
+export const WIDGETS_BLOCK_ID = "sc-contadores-stock";
+const BLOCK_TITLE = "Contadores de stock del dashboard (no editar ni activar)";
+
+interface CmsBlock {
+  id: number;
+  identifier: string;
+  content?: string;
+  update_time?: string;
 }
+
+/** El JSON del bloque; tolera que un editor lo haya envuelto en HTML o escapado comillas. */
+export function parseBlockContent(content: string | undefined): StockWidget[] {
+  const raw = (content ?? "").trim();
+  if (!raw) return [];
+  const tryParse = (t: string) => {
+    try {
+      return JSON.parse(t) as IndexFile;
+    } catch {
+      return null;
+    }
+  };
+  const decode = (t: string) => t.replace(/&quot;/g, '"').replace(/&#039;|&apos;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+  const inner = raw.slice(raw.indexOf("{"), raw.lastIndexOf("}") + 1);
+  const parsed = tryParse(raw) ?? tryParse(inner) ?? tryParse(decode(inner));
+  if (!parsed) throw new MagentoError(`El bloque CMS «${WIDGETS_BLOCK_ID}» no tiene un JSON válido.`, 500);
+  return sortWidgets((parsed.widgets ?? []).map(normalize));
+}
+
+function permissionError(e: unknown, publicRead: boolean, writing = false): unknown {
+  if (!(e instanceof MagentoError) || (e.status !== 401 && e.status !== 403)) return e;
+  return publicRead
+    ? new MagentoError("MAGENTO_TOKEN no tiene permiso de lectura en Content > Elements > Blocks: la tienda no puede leer los contadores.", 403)
+    : new MagentoError(
+        `Tu usuario de Magento no tiene permiso en Content > Elements > Blocks para ${writing ? "guardar" : "ver"} los contadores (o la sesión caducó).`,
+        403,
+      );
+}
+
+async function findBlock(publicRead: boolean): Promise<CmsBlock | null> {
+  const token = publicRead ? process.env.MAGENTO_TOKEN : undefined;
+  if (publicRead && !token) throw new MagentoError("Falta MAGENTO_TOKEN: la tienda no puede leer los contadores.", 500);
+  const q = new URLSearchParams({
+    "searchCriteria[filter_groups][0][filters][0][field]": "identifier",
+    "searchCriteria[filter_groups][0][filters][0][value]": WIDGETS_BLOCK_ID,
+    "searchCriteria[filter_groups][0][filters][0][condition_type]": "eq",
+    "searchCriteria[pageSize]": "5",
+  });
+  try {
+    const r = await magentoFetch<{ items?: CmsBlock[] | null }>(`/cmsBlock/search?${q}`, {}, 2, { token });
+    const block = (r.items ?? []).find((b) => b.identifier === WIDGETS_BLOCK_ID) ?? null;
+    return block;
+  } catch (e) {
+    throw permissionError(e, publicRead);
+  }
+}
+
+/** Si el bloque todavía no existe y Blob responde, se traen los contadores que había allí. */
+async function importFromBlob(): Promise<StockWidget[]> {
+  if (!blobConfigured()) return [];
+  try {
+    return (await storeBackend(blobStore).read({ publicRead: false })).widgets;
+  } catch {
+    return [];
+  }
+}
+
+const magentoBackend: Backend = {
+  async read({ publicRead }) {
+    const block = await findBlock(publicRead);
+    if (!block) return { widgets: publicRead ? [] : await importFromBlob(), version: "" };
+    return { widgets: parseBlockContent(block.content), version: block.update_time ?? "" };
+  },
+  async write(widgets, version) {
+    const content = JSON.stringify({ v: 1, widgets } satisfies IndexFile);
+    try {
+      const current = await findBlock(false);
+      if ((current?.update_time ?? "") !== (version ?? "")) throw new StaleWriteError();
+      const block = { identifier: WIDGETS_BLOCK_ID, title: BLOCK_TITLE, content, active: false };
+      if (current) await magentoFetch(`/cmsBlock/${current.id}`, { method: "PUT", body: { block: { id: current.id, ...block } } });
+      else {
+        await magentoFetch<CmsBlock>("/cmsBlock", { method: "POST", body: { block } });
+      }
+    } catch (e) {
+      throw permissionError(e, false, true);
+    }
+  },
+};
+
+// ---------------------------------------------------------------------------
+// Lectura con caché y escritura.
 
 /**
- * Todos los contadores. `cached`: para la tienda (copia en memoria de hasta 10 min y la
- * última buena si Blob falla). Sin `cached` (dashboard) se lee el índice actual.
+ * Todos los contadores. `cached`: para la tienda (copia en memoria de hasta 10 min, con
+ * MAGENTO_TOKEN; si falla, la última copia buena). Sin `cached` (dashboard) se lee la
+ * lista actual con el usuario conectado.
  */
 export async function listWidgets(opts: { cached?: boolean } = {}): Promise<StockWidget[]> {
-  const s = store();
-  if (!s) return [];
+  const b = backend();
+  if (!b) return [];
   if (opts.cached && snapshot && Date.now() - snapshot.at < CACHE_MS) return snapshot.widgets;
   try {
-    return await loadAll(s);
+    const { widgets } = await b.read({ publicRead: Boolean(opts.cached) });
+    snapshot = { at: Date.now(), widgets };
+    return widgets;
   } catch (e) {
     if (opts.cached && snapshot) {
-      console.error("Contadores: Blob no respondió, se usa la última copia", e);
+      console.error("Contadores: no se pudieron leer, se usa la última copia", e);
       snapshot = { ...snapshot, at: Date.now() - CACHE_MS + 60_000 }; // reintentar en 1 minuto
       return snapshot.widgets;
     }
     throw e;
+  }
+}
+
+/** Prueba la lectura que hace la tienda (sin caché). null = bien; si no, el motivo. */
+export async function checkPublicRead(): Promise<string | null> {
+  const b = backend();
+  if (!b) return null;
+  try {
+    await b.read({ publicRead: true });
+    return null;
+  } catch (e) {
+    return e instanceof Error ? e.message : String(e);
   }
 }
 
@@ -221,14 +355,13 @@ export async function getWidget(sku: string, opts: { cached?: boolean } = {}): P
   return (await listWidgets(opts)).find((w) => w.sku.toLowerCase() === k) ?? null;
 }
 
-/** Cambia el índice leyendo y escribiendo con control de versión (reintenta si otro lo cambió). */
-async function updateIndex(s: Store, change: (ws: StockWidget[]) => StockWidget[]): Promise<void> {
+/** Cambia la lista leyendo y escribiendo con control de versión (reintenta si otro la cambió). */
+async function updateWidgets(b: Backend, change: (ws: StockWidget[]) => StockWidget[], what: { saved?: StockWidget; deletedSku?: string }) {
   for (let attempt = 0; ; attempt++) {
-    const idx = await readIndex(s);
-    const current = idx.missing ? await buildIndexFromFiles(s) : idx.widgets;
-    const next = sortWidgets(change(current));
+    const { widgets, version } = await b.read({ publicRead: false });
+    const next = sortWidgets(change(widgets));
     try {
-      await s.put(INDEX, JSON.stringify({ v: 1, widgets: next } satisfies IndexFile), idx.etag);
+      await b.write(next, version, what);
       snapshot = { at: Date.now(), widgets: next };
       return;
     } catch (e) {
@@ -279,20 +412,17 @@ export function parseWidgetInput(body: unknown): Omit<StockWidget, "updatedAt" |
 }
 
 export async function saveWidget(input: Omit<StockWidget, "updatedAt" | "updatedBy">, user: string | null): Promise<StockWidget> {
-  const s = store();
-  if (!s) throw new WidgetInputError("Falta configurar Vercel Blob (BLOB_STORE_ID o BLOB_READ_WRITE_TOKEN) para guardar contadores.");
+  const b = backend();
+  if (!b) throw new WidgetInputError("Falta MAGENTO_BASE_URL: no hay dónde guardar los contadores.");
   const w: StockWidget = { ...input, updatedAt: new Date().toISOString(), updatedBy: user };
   const k = w.sku.toLowerCase();
-  await updateIndex(s, (ws) => [...ws.filter((x) => x.sku.toLowerCase() !== k), w]);
-  // Copia suelta por SKU: respaldo legible y compatible con versiones anteriores.
-  await s.put(keyOf(w.sku), JSON.stringify(w));
+  await updateWidgets(b, (ws) => [...ws.filter((x) => x.sku.toLowerCase() !== k), w], { saved: w });
   return w;
 }
 
 export async function deleteWidget(sku: string): Promise<void> {
-  const s = store();
-  if (!s) return;
+  const b = backend();
+  if (!b) return;
   const k = sku.trim().toLowerCase();
-  await updateIndex(s, (ws) => ws.filter((x) => x.sku.toLowerCase() !== k));
-  await s.del(keyOf(sku));
+  await updateWidgets(b, (ws) => ws.filter((x) => x.sku.toLowerCase() !== k), { deletedSku: sku });
 }

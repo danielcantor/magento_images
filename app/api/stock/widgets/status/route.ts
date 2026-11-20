@@ -6,7 +6,7 @@ import { MagentoError } from "@/lib/magento";
 import { getProductNames, getSourceItems, getSourceItemsMany } from "@/lib/stock";
 import { countSoldUnits } from "@/lib/stockSales";
 import { remainingUnits } from "@/lib/stockDiagnosis";
-import { listWidgets, widgetsEnabled, type StockWidget } from "@/lib/stockWidgets";
+import { checkPublicRead, listWidgets, widgetsEnabled, type StockWidget } from "@/lib/stockWidgets";
 import { widgetVisibility, type WidgetStatus, type WidgetsStatusResponse } from "@/lib/stockVisibility";
 
 export const dynamic = "force-dynamic";
@@ -14,9 +14,12 @@ export const dynamic = "force-dynamic";
 const errMsg = (e: unknown) => (e instanceof MagentoError ? e.message : "Error consultando Magento");
 
 async function storeTokenCheck(first: StockWidget | undefined): Promise<WidgetsStatusResponse["storeToken"]> {
-  if (!first) return null;
   const token = process.env.MAGENTO_TOKEN;
-  if (!token) return { ok: false, message: "Falta MAGENTO_TOKEN: la tienda no puede mostrar los contadores." };
+  if (!token) return first ? { ok: false, message: "Falta MAGENTO_TOKEN: la tienda no puede mostrar los contadores." } : null;
+  // La tienda primero lee la lista de contadores (bloque CMS) con MAGENTO_TOKEN.
+  const readError = await checkPublicRead();
+  if (readError) return { ok: false, message: readError };
+  if (!first) return { ok: true };
   try {
     // Misma clase de consulta que hace el endpoint público para ese contador.
     if (first.mode === "orders" && first.since) await countSoldUnits(first.sku, first.since, first.statuses, token);
@@ -33,12 +36,12 @@ export async function GET() {
   try {
     all = await listWidgets();
   } catch (e) {
-    console.error(e);
-    return NextResponse.json({ error: "No se pudieron leer los contadores." }, { status: 500 });
+    if (!(e instanceof MagentoError)) console.error(e);
+    return NextResponse.json({ error: e instanceof MagentoError ? e.message : "No se pudieron leer los contadores." }, { status: 500 });
   }
   const active = all.filter((w) => w.enabled);
   const paused = all.filter((w) => !w.enabled).map((w) => ({ sku: w.sku, updatedAt: w.updatedAt }));
-  if (!active.length) return NextResponse.json({ enabled: true, active: [], paused, storeToken: null } satisfies WidgetsStatusResponse);
+  if (!active.length) return NextResponse.json({ enabled: true, active: [], paused, storeToken: await storeTokenCheck(undefined) } satisfies WidgetsStatusResponse);
 
   const bySources = active.filter((w) => !(w.mode === "orders" && w.since));
   const [names, sources, token] = await Promise.all([

@@ -93,7 +93,7 @@ export default function HomeView({ username, auditEnabled }: { username: string 
 
         {statusError && <div className="alert">{statusError}</div>}
         {status && !status.enabled && (
-          <div className="alert info">Para guardar contadores hace falta Vercel Blob (BLOB_STORE_ID o BLOB_READ_WRITE_TOKEN) en este entorno.</div>
+          <div className="alert info">Para guardar contadores hace falta MAGENTO_BASE_URL en este entorno.</div>
         )}
 
         <div className="kpis" aria-busy={loading}>

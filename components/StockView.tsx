@@ -479,7 +479,7 @@ export default function StockView() {
         </>
       )}
 
-      {!widgetsEnabled && <div className="alert info">Para guardar contadores hace falta Vercel Blob (BLOB_STORE_ID o BLOB_READ_WRITE_TOKEN) en este entorno.</div>}
+      {!widgetsEnabled && <div className="alert info">Para guardar contadores hace falta MAGENTO_BASE_URL en este entorno.</div>}
 
       {widgets.length > 0 && (
         <div className="card">

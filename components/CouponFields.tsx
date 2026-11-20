@@ -93,7 +93,7 @@ export default function CouponFields({
           ) : check?.state === "unknown" ? (
             <span className="badge warn">{check.message}</span>
           ) : (
-            <span className="muted">Se muestra en la ficha, debajo de la barra, con botón de copiar (en bloques manuales como la home, solo con data-cupon="si"). Se verifica en Magento al salir del campo.</span>
+            <span className="muted">Se muestra en la ficha, debajo de la barra, con botón de copiar (en bloques manuales como la home, solo con data-cupon="si"). Se verifica en Magento al salir del campo. Los precios del texto (p. ej. $309.999) salen en negrita.</span>
           )}
         </span>
       )}

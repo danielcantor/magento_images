@@ -15,6 +15,7 @@
  *     - copiar_cupon: { item_name, item_id, coupon, copy_method: "boton" | "seleccion_manual", placement }
  *   item_name sale del título de la ficha o de data-name="…" en el <div>.
  *   En la ficha (modo global) el cupón se muestra siempre que el contador tenga uno.
+ *   En el texto del cupón, los precios ("$309.999") se muestran en negrita.
  * Listados (categorías, buscador, carruseles): el mismo script agrega una versión compacta del
  *   contador en cada card de un producto con contador activo, entre el nombre y las estrellas.
  *   Sin cupón. Para desactivarlo: data-cards="off" en el <script>. Analytics: placement "listado".
@@ -155,11 +156,28 @@
     io.observe(el);
   }
 
+  // Precios como "$309.999" o "$ 1.299,50" en negrita. Se arma con nodos de texto (sin innerHTML).
+  var PRICE = /\$\s?\d(?:[\d.,]*\d)?/g;
+  function withBoldPrices(el, text) {
+    var last = 0;
+    var m;
+    PRICE.lastIndex = 0;
+    while ((m = PRICE.exec(text))) {
+      if (m.index > last) el.appendChild(document.createTextNode(text.slice(last, m.index)));
+      var b = document.createElement("strong");
+      b.style.fontWeight = "700";
+      b.textContent = m[0];
+      el.appendChild(b);
+      last = m.index + m[0].length;
+    }
+    if (last < text.length) el.appendChild(document.createTextNode(text.slice(last)));
+  }
+
   function coupon(code, label, product) {
     var row = document.createElement("div");
     row.style.cssText = "display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:12px;font-size:14px";
     var t = document.createElement("span");
-    t.textContent = label || "Sumá un descuento extra con el cupón";
+    withBoldPrices(t, label || "Sumá un descuento extra con el cupón");
 
     var btn = document.createElement("button");
     btn.type = "button";
